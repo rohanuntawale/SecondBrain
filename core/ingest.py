@@ -9,7 +9,13 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from . import config, store
+try:
+    from . import config, store
+except ImportError:  # allow running directly: python core/ingest.py
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from core import config, store
 
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
 _FRONTMATTER_RE = re.compile(r"^---\s*\n.*?\n---\s*\n", re.DOTALL)

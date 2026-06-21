@@ -1,0 +1,5 @@
+# Pyrefly type-checker config.
+# Point the analyzer at this project's virtualenv so it resolves installed
+# packages (groq, chromadb, streamlit, mcp, sentence-transformers, ...).
+python-interpreter = ".venv/Scripts/python.exe"
+project-includes = ["core", "scripts", "app.py", "mcp_server.py"]

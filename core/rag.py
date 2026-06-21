@@ -4,7 +4,14 @@ prompt, call the LLM, and return the answer plus its sources (citations).
 
 from __future__ import annotations
 
-from . import config, llm, store
+try:
+    from . import config, llm, store
+except ImportError:  # allow running directly: python core/rag.py
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from core import config, llm, store
 
 _SYSTEM = (
     "You are SecondBrain, answering questions about the user's personal notes. "

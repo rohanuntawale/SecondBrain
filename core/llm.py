@@ -6,7 +6,14 @@ LLM_PROVIDER env var: "ollama" (local, offline) or "groq" (free hosted API).
 
 from __future__ import annotations
 
-from . import config
+try:
+    from . import config
+except ImportError:  # allow running directly: python core/llm.py
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from core import config
 
 
 class LLMError(RuntimeError):
