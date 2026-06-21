@@ -71,7 +71,10 @@ def _chat_groq(system: str, user: str) -> str:
                 {"role": "user", "content": user},
             ],
         )
-        return resp.choices[0].message.content.strip()
+        content = resp.choices[0].message.content
+        if content is None:
+            raise LLMError("Groq returned no text content (message.content is None).")
+        return content.strip()
     except Exception as e:
         raise LLMError(f"Groq API call failed: {e}") from e
 

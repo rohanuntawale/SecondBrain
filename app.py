@@ -15,9 +15,14 @@ import streamlit as st
 
 # On Streamlit Cloud, secrets arrive via st.secrets — mirror them into the
 # environment BEFORE importing core (which reads env at import time).
-for key in ("LLM_PROVIDER", "GROQ_API_KEY", "GROQ_MODEL", "OLLAMA_MODEL"):
-    if key in st.secrets:
-        os.environ[key] = str(st.secrets[key])
+# Locally there is no secrets.toml (config comes from .env), and touching
+# st.secrets then raises StreamlitSecretNotFoundError — so guard it.
+try:
+    for key in ("LLM_PROVIDER", "GROQ_API_KEY", "GROQ_MODEL", "OLLAMA_MODEL"):
+        if key in st.secrets:
+            os.environ[key] = str(st.secrets[key])
+except Exception:
+    pass  # no secrets.toml found locally — fall back to .env / environment
 
 from core import config, ingest, rag, store, tools  # noqa: E402
 

@@ -1,0 +1,10 @@
+# Streamlit's file-watcher introspects every imported module, which makes it
+# walk torch/transformers internals and spam "No module named 'torchvision'"
+# tracebacks (torchvision is an optional transformers dependency we don't use).
+# Disabling the watcher stops the noise. Trade-off: edits to source files won't
+# hot-reload automatically — click "Rerun" (top-right) or press "R" in the app.
+[server]
+fileWatcherType = "none"
+
+[browser]
+gatherUsageStats = false
