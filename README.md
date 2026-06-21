@@ -21,11 +21,11 @@ copy .env.example .env          # then edit .env if needed
 
 Edit `.env`:
 
-- **Local / offline (dev):** install [Ollama](https://ollama.com), then
-  `ollama pull llama3.2:3b`, and set `LLM_PROVIDER=ollama`.
-- **Hosted free (for sharing):** get a free key at
+- **Cloud / free (default):** get a free key at
   [console.groq.com](https://console.groq.com), set `LLM_PROVIDER=groq` and
-  `GROQ_API_KEY=gsk_...`.
+  `GROQ_API_KEY=gsk_...`. No local model download needed.
+- **Local / offline:** install [Ollama](https://ollama.com), then
+  `ollama pull llama3.2:3b`, and set `LLM_PROVIDER=ollama`.
 
 > Retrieval works without any LLM — you just won't get a generated answer until a
 > provider is configured.
@@ -35,6 +35,7 @@ Edit `.env`:
 ```powershell
 python scripts\reindex.py        # build the vector index from notes/
 python -m core.rag               # ask a sample question end-to-end
+streamlit run app.py             # launch the web UI at http://localhost:8501
 ```
 
 ## Project layout
@@ -44,8 +45,10 @@ core/        one brain: config, llm (provider switch), store (ChromaDB),
              ingest (md -> chunks -> embeddings), rag (Q&A + citations),
              tools (note actions)
 notes/       the Markdown vault (source of truth)
-scripts/     reindex.py — rebuild the index
-docs/        project context + report outline
+mcp_server.py  FastMCP server (Claude Desktop)
+app.py         Streamlit web UI (deployed)
+scripts/     reindex.py, evaluate.py
+docs/        project context, report outline, deploy guide
 ```
 
 ## Status
@@ -55,8 +58,9 @@ docs/        project context + report outline
 - [x] Provider switch (Ollama | Groq)
 - [x] RAG answer with citations
 - [x] Note-action tools (search/create/suggest_tags/link/orphans)
-- [ ] `mcp_server.py` (FastMCP wrappers)
-- [ ] `app.py` (Streamlit UI)
+- [x] `mcp_server.py` (FastMCP wrappers)
+- [x] `app.py` (Streamlit UI)
 - [ ] Deploy to Streamlit Community Cloud
 
-See `docs/PROJECT_CONTEXT.md` for the full specification and build order.
+See `docs/PROJECT_CONTEXT.md` for the full specification and `docs/DEPLOY.md` for
+deployment steps.
