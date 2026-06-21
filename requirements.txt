@@ -1,0 +1,8 @@
+streamlit
+chromadb
+sentence-transformers
+python-dotenv
+ollama
+groq
+mcp
+markdown-it-py
