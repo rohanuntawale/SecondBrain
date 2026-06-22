@@ -30,7 +30,7 @@ except Exception:
 
 import pandas as pd  # noqa: E402
 
-from core import config, couple, ingest, photos, rag, store, tools  # noqa: E402
+from core import config, couple, ingest, llm, photos, rag, repo, store, tools  # noqa: E402
 
 st.set_page_config(page_title="SecondBrain", page_icon="🧠", layout="wide")
 
@@ -77,6 +77,28 @@ def hearts_html(n: int = 16) -> str:
             f'animation-delay:{delay}s;animation-duration:{dur}s;">{emo}</span>'
         )
     return "".join(spans)
+
+
+@st.fragment(run_every=15)
+def live_sync():
+    """Poll the shared vault every 15s; rebuild + refresh when it changes, so a
+    note/photo/love-note your partner adds shows up without a manual sync."""
+    try:
+        ts = str(repo.get_repo().latest_change_ts())
+    except Exception:
+        return
+    last = st.session_state.get("_last_change_ts")
+    if last is None:
+        st.session_state["_last_change_ts"] = ts
+        return
+    if ts != last:
+        st.session_state["_last_change_ts"] = ts
+        try:
+            ingest.build_index()
+        except Exception:
+            pass
+        st.session_state["_just_synced"] = True
+        st.rerun()
 
 st.markdown(
     f"""
@@ -393,6 +415,9 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+if st.session_state.pop("_just_synced", False):
+    st.toast("💞 New updates from your partner — synced!")
+
 
 # --- Sidebar ------------------------------------------------------------------
 with st.sidebar:
@@ -436,10 +461,15 @@ with st.sidebar:
     if config.LLM_PROVIDER == "groq" and not config.GROQ_API_KEY:
         st.warning("No GROQ_API_KEY set — retrieval works, but answers need a key.")
 
+    # Live sync: auto-pull partner's changes every 15s (shared mode only).
+    if config.STORAGE_BACKEND == "supabase":
+        st.caption("🟢 Live sync on")
+        live_sync()
+
 
 # --- Tabs ---------------------------------------------------------------------
 PAGES = [
-    "💬 Ask", "💞 Us", "📸 Photos", "📔 Diary", "📚 Notes",
+    "💬 Ask", "💞 Us", "📸 Photos", "📔 Diary", "💡 Insights", "📚 Notes",
     "✍️ Create", "📰 Digest", "⬆️ Upload",
 ]
 # A wrapping radio "nav bar" instead of st.tabs — tabs scroll off-screen on
@@ -449,40 +479,72 @@ page = st.radio(
     "Go to", PAGES, horizontal=True, label_visibility="collapsed", key="nav"
 )
 
-# Ask -------------------------------------------------------------------------
+# Ask (streaming multi-turn chat) ---------------------------------------------
 if page == "💬 Ask":
     st.subheader("Ask anything")
     _MODE_LABELS = {
-        "notes": "📚 Notes only (grounded + citations)",
-        "hybrid": "✨ Hybrid (notes first, then general knowledge)",
-        "general": "💭 General chat (no notes)",
+        "notes": "📚 Notes only",
+        "hybrid": "✨ Hybrid",
+        "general": "💭 General chat",
     }
-    mode_label = st.radio(
-        "Mode",
-        list(_MODE_LABELS.values()),
-        horizontal=True,
-        help="Notes = strictly from your vault. Hybrid = notes first, falls back "
-        "to general knowledge. General = a normal assistant, ignores your notes.",
-    )
-    mode = next(k for k, v in _MODE_LABELS.items() if v == mode_label)
+    mc1, mc2 = st.columns([4, 1])
+    with mc1:
+        mode_label = st.radio(
+            "Mode",
+            list(_MODE_LABELS.values()),
+            horizontal=True,
+            help="Notes = strictly from your vault (cited). Hybrid = notes first, "
+            "then general knowledge. General = a normal assistant.",
+        )
+    chat_mode = next(k for k, v in _MODE_LABELS.items() if v == mode_label)
+    with mc2:
+        if st.button("🧹 New chat"):
+            st.session_state.chat = []
+            st.rerun()
 
-    placeholder = (
-        "What is RAG and why use it?"
-        if mode == "notes"
-        else "Ask me anything — e.g. 'suggest a cute date idea'"
-    )
-    question = st.text_input("Question", placeholder=placeholder)
-    if st.button("Ask", type="primary") and question.strip():
-        with st.spinner("Thinking..."):
-            result = rag.answer(question, mode=mode)
-        st.markdown(result["answer"])
-        if result["sources"]:
-            with st.expander("Sources"):
-                for s in result["sources"]:
-                    st.markdown(
-                        f"- **{s['note_title']} › {s['heading']}** "
-                        f"(`{s['source']}`)"
-                    )
+    if "chat" not in st.session_state:
+        st.session_state.chat = []
+
+    def _render_sources(srcs):
+        with st.expander("Sources"):
+            for s in srcs:
+                st.markdown(
+                    f"- **{s['note_title']} › {s['heading']}** (`{s['source']}`)"
+                )
+
+    # Replay the conversation.
+    for m in st.session_state.chat:
+        avatar = "🧑" if m["role"] == "user" else "🧠"
+        with st.chat_message(m["role"], avatar=avatar):
+            st.markdown(m["content"])
+            if m.get("sources"):
+                _render_sources(m["sources"])
+
+    prompt = st.chat_input("Ask your notes, or just chat…")
+    if prompt and prompt.strip():
+        st.session_state.chat.append({"role": "user", "content": prompt})
+        with st.chat_message("user", avatar="🧑"):
+            st.markdown(prompt)
+
+        history = [
+            {"role": m["role"], "content": m["content"]}
+            for m in st.session_state.chat[:-1]
+        ]
+        messages, sources = rag.build_chat_messages(prompt, chat_mode, history)
+
+        def _safe_stream():
+            try:
+                yield from llm.stream(messages)
+            except llm.LLMError as e:
+                yield f"\n\n_[LLM unavailable: {e}]_"
+
+        with st.chat_message("assistant", avatar="🧠"):
+            full = st.write_stream(_safe_stream())
+            if sources:
+                _render_sources(sources)
+        st.session_state.chat.append(
+            {"role": "assistant", "content": full, "sources": sources}
+        )
 
 # Us (couple dashboard) -------------------------------------------------------
 elif page == "💞 Us":
@@ -822,6 +884,35 @@ elif page == "📔 Diary":
                 """,
                 unsafe_allow_html=True,
             )
+
+# Insights --------------------------------------------------------------------
+elif page == "💡 Insights":
+    st.subheader("💡 Insights")
+    st.caption("AI reflections on your shared diary, and a search over your memories by meaning.")
+
+    if st.button("✨ Generate insights", type="primary"):
+        with st.spinner("Reflecting on your memories..."):
+            txt = couple.relationship_insights()
+        st.markdown(
+            f'<div class="sb-card"><div class="body">{txt}</div></div>',
+            unsafe_allow_html=True,
+        )
+
+    st.markdown("##### 🔎 Search memories")
+    st.caption("Find moments by meaning — e.g. “happy travel days”, “when we cooked together”.")
+    mq = st.text_input("Search your memories", key="mem_query", placeholder="happy travel days…")
+    if mq.strip():
+        hits = couple.search_memories(mq)
+        if not hits:
+            st.info("No matching memories yet — write more diary entries. 💞")
+        else:
+            for h in hits:
+                st.markdown(
+                    f'<div class="sb-card"><div class="meta">{h["title"]} · match {h["score"]}</div>'
+                    f'<div class="body">{h["text"][:260]}</div></div>',
+                    unsafe_allow_html=True,
+                )
+
 
 # Notes -----------------------------------------------------------------------
 elif page == "📚 Notes":

@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 from datetime import date, datetime
 
-from . import ingest, llm, repo, tools
+from . import ingest, llm, repo, store, tools
 
 SETTINGS_PATH = "meta/couple.json.md"
 
@@ -225,6 +225,54 @@ def list_love_messages(recipient: str | None = None) -> list[dict]:
             }
         )
     out.sort(key=lambda m: (m["date"], m["path"]), reverse=True)
+    return out
+
+
+def relationship_insights() -> str:
+    """LLM reflection on the couple's diary: themes, joys, gratitude, a sweet note."""
+    entries = tools.list_diary_entries()
+    if not entries:
+        return "No diary entries yet — write a few and I'll find the patterns. 💞"
+    lines = []
+    for e in entries[:40]:
+        mood = f" (mood: {e['mood']})" if e["mood"] else ""
+        lines.append(f"- {e['date']} · {e['author']}{mood}: {e['preview']}")
+    digest = "\n".join(lines)
+    system = (
+        "You are a warm relationship companion. From the couple's diary entries "
+        "below, write a short, uplifting insights summary (4-6 sentences): the key "
+        "themes, what seems to make them happiest, recurring gratitude/moments, and "
+        "one sweet observation. Be specific and kind; never negative or clinical."
+    )
+    try:
+        return llm.chat(system, digest)
+    except llm.LLMError as e:
+        return f"[Set up an LLM to generate insights] ({e})"
+
+
+def search_memories(query: str, k: int = 5) -> list[dict]:
+    """Semantic search over diary entries — 'find our happy travel memories'."""
+    if not query.strip():
+        return []
+    q_emb = store.embed([query])[0]
+    res = store.query(q_emb, max(k * 3, 12))
+    docs = res.get("documents", [[]])[0]
+    metas = res.get("metadatas", [[]])[0]
+    dists = res.get("distances", [[]])[0]
+    out: list[dict] = []
+    for doc, meta, dist in zip(docs, metas, dists):
+        if not str(meta.get("source", "")).startswith("diary/"):
+            continue
+        out.append(
+            {
+                "title": meta.get("note_title", "Memory"),
+                "source": meta.get("source"),
+                "text": doc,
+                "score": round(1 - dist, 4),
+            }
+        )
+        if len(out) >= k:
+            break
     return out
 
 

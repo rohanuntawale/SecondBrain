@@ -58,6 +58,47 @@ def retrieve(question: str, k: int | None = None):
     return docs, metas
 
 
+def build_chat_messages(question: str, mode: str = "notes", history=None):
+    """Assemble a streaming chat turn: returns (messages, sources).
+
+    `history` is prior turns as [{"role": "user"|"assistant", "content": str}].
+    For notes/hybrid modes the freshly retrieved context is injected into the
+    current user turn; `sources` lists the cited chunks (empty in general mode).
+    """
+    mode = mode if mode in MODES else "notes"
+    history = history or []
+    sources: list[dict] = []
+
+    if mode == "general":
+        system = _SYSTEM_GENERAL
+        user_content = question
+    else:
+        docs, metas = retrieve(question)
+        sources = [
+            {
+                "source": m.get("source"),
+                "heading": m.get("heading"),
+                "note_title": m.get("note_title"),
+            }
+            for m in metas
+        ]
+        system = _SYSTEM_NOTES if mode == "notes" else _SYSTEM_HYBRID
+        if docs:
+            context = _format_context(docs, metas)
+            user_content = f"Context:\n\n{context}\n\nQuestion: {question}"
+        elif mode == "notes":
+            user_content = f"(No relevant notes found.)\n\nQuestion: {question}"
+        else:
+            user_content = f"(No relevant notes found.)\n\nQuestion: {question}"
+
+    messages = (
+        [{"role": "system", "content": system}]
+        + list(history)
+        + [{"role": "user", "content": user_content}]
+    )
+    return messages, sources
+
+
 def answer(question: str, mode: str = "notes") -> dict:
     """Answer a question in one of three modes.
 

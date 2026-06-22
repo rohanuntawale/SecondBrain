@@ -106,6 +106,11 @@ class FileRepo:
             if not n.path.startswith(config.HIDDEN_PREFIXES)
         ]
 
+    def latest_change_ts(self) -> str | None:
+        """A token of the most recent change to ANY note (for live-sync polling)."""
+        times = [n.updated for n in self.all_notes()]
+        return max(times).isoformat() if times else None
+
     def notes_under(
         self, prefix: str, limit: int | None = None, newest_first: bool = False
     ) -> list[NoteRecord]:
@@ -186,6 +191,18 @@ class SupabaseRepo:
             q = q.not_.like("path", f"{pre}%")
         res = q.order("path").execute()
         return [self._row(r) for r in (res.data or [])]
+
+    def latest_change_ts(self) -> str | None:
+        """Most-recent updated_at across all notes (one cheap row) for live sync."""
+        res = (
+            self.client.table(self.TABLE)
+            .select("updated_at")
+            .order("updated_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        rows = res.data or []
+        return rows[0]["updated_at"] if rows else None
 
     def notes_under(
         self, prefix: str, limit: int | None = None, newest_first: bool = False

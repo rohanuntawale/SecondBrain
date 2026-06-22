@@ -32,6 +32,61 @@ def chat(system: str, user: str) -> str:
     )
 
 
+def stream(messages: list[dict]):
+    """Yield response text chunks for a full chat `messages` list (streaming).
+
+    messages: [{"role": "system"|"user"|"assistant", "content": str}, ...].
+    Routes by LLM_PROVIDER. Raises LLMError if no provider is reachable.
+    """
+    provider = config.LLM_PROVIDER
+    if provider == "ollama":
+        yield from _stream_ollama(messages)
+    elif provider == "groq":
+        yield from _stream_groq(messages)
+    else:
+        raise LLMError(
+            f"Unknown LLM_PROVIDER={provider!r}. Set it to 'ollama' or 'groq'."
+        )
+
+
+def _stream_groq(messages: list[dict]):
+    if not config.GROQ_API_KEY:
+        raise LLMError("GROQ_API_KEY is empty. Add it to .env or Streamlit secrets.")
+    try:
+        from groq import Groq
+    except ImportError as e:  # pragma: no cover
+        raise LLMError("The 'groq' package is not installed.") from e
+    try:
+        client = Groq(api_key=config.GROQ_API_KEY)
+        completion = client.chat.completions.create(
+            model=config.GROQ_MODEL, messages=messages, stream=True
+        )
+        for chunk in completion:
+            delta = chunk.choices[0].delta.content
+            if delta:
+                yield delta
+    except Exception as e:
+        raise LLMError(f"Groq streaming failed: {e}") from e
+
+
+def _stream_ollama(messages: list[dict]):
+    try:
+        import ollama
+    except ImportError as e:  # pragma: no cover
+        raise LLMError("The 'ollama' package is not installed.") from e
+    try:
+        for part in ollama.chat(
+            model=config.OLLAMA_MODEL, messages=messages, stream=True
+        ):
+            piece = part.get("message", {}).get("content", "")
+            if piece:
+                yield piece
+    except Exception as e:
+        raise LLMError(
+            f"Could not reach Ollama. Is it running? Original error: {e}"
+        ) from e
+
+
 def _chat_ollama(system: str, user: str) -> str:
     try:
         import ollama
