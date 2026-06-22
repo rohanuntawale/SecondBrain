@@ -6,3 +6,5 @@ ollama
 groq
 mcp
 markdown-it-py
+supabase
+pypdf

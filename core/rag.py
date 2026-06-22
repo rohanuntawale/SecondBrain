@@ -13,12 +13,31 @@ except ImportError:  # allow running directly: python core/rag.py
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     from core import config, llm, store
 
-_SYSTEM = (
+# Three answering modes. "notes" stays strictly grounded (the original RAG
+# behavior); "hybrid" prefers notes but may fall back to general knowledge;
+# "general" skips retrieval entirely for everyday chit-chat.
+_SYSTEM_NOTES = (
     "You are SecondBrain, answering questions about the user's personal notes. "
     "Answer ONLY using the provided context. Cite sources inline as "
     "[note_title › heading]. If the answer is not in the context, say you "
     "don't have that in the notes. Be concise."
 )
+
+_SYSTEM_HYBRID = (
+    "You are SecondBrain, a warm personal assistant. Prefer the user's notes "
+    "below when they are relevant, and cite them inline as [note_title › heading]. "
+    "If the notes do not cover the question, you may answer from general "
+    "knowledge — but make clear when you are going beyond the notes. Be friendly "
+    "and concise."
+)
+
+_SYSTEM_GENERAL = (
+    "You are SecondBrain, a warm and friendly personal assistant. Answer "
+    "everyday questions helpfully and concisely. You are not limited to the "
+    "user's notes in this mode."
+)
+
+MODES = ("notes", "hybrid", "general")
 
 
 def _format_context(docs, metas) -> str:
@@ -39,25 +58,47 @@ def retrieve(question: str, k: int | None = None):
     return docs, metas
 
 
-def answer(question: str) -> dict:
-    """Full RAG answer with citations.
+def answer(question: str, mode: str = "notes") -> dict:
+    """Answer a question in one of three modes.
 
-    Returns: {"answer": str, "sources": [{source, heading, note_title}], "context_found": bool}
+    - "notes":   strictly grounded in retrieved notes, with citations (RAG).
+    - "hybrid":  prefers notes but may use general knowledge as a fallback.
+    - "general": no retrieval — a plain friendly assistant for everyday questions.
+
+    Returns: {"answer": str, "sources": [{source, heading, note_title}],
+              "context_found": bool, "mode": str}
     """
+    if mode not in MODES:
+        mode = "notes"
+
+    # General mode skips retrieval entirely.
+    if mode == "general":
+        try:
+            text = llm.chat(_SYSTEM_GENERAL, question)
+        except llm.LLMError as e:
+            text = f"[LLM unavailable] Set up Ollama or Groq to chat.\n\nDetails: {e}"
+        return {"answer": text, "sources": [], "context_found": False, "mode": mode}
+
     docs, metas = retrieve(question)
 
-    if not docs:
+    if not docs and mode == "notes":
         return {
             "answer": "No notes are indexed yet. Run the re-index step first.",
             "sources": [],
             "context_found": False,
+            "mode": mode,
         }
 
-    context = _format_context(docs, metas)
-    user_msg = f"Context:\n\n{context}\n\nQuestion: {question}"
+    system = _SYSTEM_NOTES if mode == "notes" else _SYSTEM_HYBRID
+    if docs:
+        context = _format_context(docs, metas)
+        user_msg = f"Context:\n\n{context}\n\nQuestion: {question}"
+    else:
+        # hybrid with nothing retrieved — answer from general knowledge.
+        user_msg = f"(No relevant notes found.)\n\nQuestion: {question}"
 
     try:
-        text = llm.chat(_SYSTEM, user_msg)
+        text = llm.chat(system, user_msg)
     except llm.LLMError as e:
         text = (
             "[LLM unavailable] Retrieval worked, but no language model is reachable "
@@ -72,7 +113,12 @@ def answer(question: str) -> dict:
         }
         for m in metas
     ]
-    return {"answer": text, "sources": sources, "context_found": True}
+    return {
+        "answer": text,
+        "sources": sources,
+        "context_found": bool(docs),
+        "mode": mode,
+    }
 
 
 if __name__ == "__main__":

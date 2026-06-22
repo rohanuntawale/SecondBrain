@@ -37,6 +37,11 @@ GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
 TOP_K: int = int(os.getenv("TOP_K", "4"))
 CHUNK_MAX_CHARS: int = int(os.getenv("CHUNK_MAX_CHARS", "1200"))
 
+# --- Storage backend: "local" (files) or "supabase" (shared cloud vault) ---
+STORAGE_BACKEND: str = os.getenv("STORAGE_BACKEND", "local").strip().lower()
+SUPABASE_URL: str = os.getenv("SUPABASE_URL", "").strip()
+SUPABASE_KEY: str = os.getenv("SUPABASE_KEY", "").strip()
+
 # Collection name inside ChromaDB.
 COLLECTION_NAME: str = "notes"
 
@@ -57,6 +62,9 @@ def summary() -> str:
             f"GROQ_API_KEY   = {'<set>' if GROQ_API_KEY else '<empty>'}",
             f"TOP_K          = {TOP_K}",
             f"CHUNK_MAX_CHARS= {CHUNK_MAX_CHARS}",
+            f"STORAGE_BACKEND= {STORAGE_BACKEND}",
+            f"SUPABASE_URL   = {SUPABASE_URL or '<empty>'}",
+            f"SUPABASE_KEY   = {'<set>' if SUPABASE_KEY else '<empty>'}",
         ]
     )
 

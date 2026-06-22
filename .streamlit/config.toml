@@ -8,3 +8,13 @@ fileWatcherType = "none"
 
 [browser]
 gatherUsageStats = false
+
+# White & gold theme. Streamlit reads these on startup; app.py layers extra CSS
+# on top for the gradient header and gold buttons.
+[theme]
+base = "light"
+primaryColor = "#C8A227"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#FBF6E9"
+textColor = "#2B2B2B"
+font = "serif"

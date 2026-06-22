@@ -16,9 +16,10 @@ mcp = FastMCP("SecondBrain")
 
 
 @mcp.tool()
-def ask(question: str) -> dict:
-    """Answer a question grounded in the notes, with citations (RAG)."""
-    return rag.answer(question)
+def ask(question: str, mode: str = "notes") -> dict:
+    """Answer a question. mode: 'notes' (grounded+cited), 'hybrid' (notes then
+    general knowledge), or 'general' (no retrieval — everyday chat)."""
+    return rag.answer(question, mode=mode)
 
 
 @mcp.tool()
@@ -40,9 +41,12 @@ def list_notes() -> list[str]:
 
 
 @mcp.tool()
-def create_note(title: str, body: str, tags: list[str] = []) -> str:
-    """Create a new Markdown note with front-matter and re-index it."""
-    return tools.create_note(title, body, tags)
+def create_note(
+    title: str, body: str, tags: list[str] = [], author: str = ""
+) -> str:
+    """Create a new Markdown note with front-matter and re-index it.
+    author (optional) attributes it to a person for later filtering."""
+    return tools.create_note(title, body, tags, author=author)
 
 
 @mcp.tool()
@@ -67,6 +71,38 @@ def add_link(from_path: str, to_title: str) -> str:
 def find_orphans() -> list[str]:
     """List notes that no [[wiki-link]] points to."""
     return tools.find_orphans()
+
+
+@mcp.tool()
+def suggest_links(path: str, k: int = 3) -> list[dict]:
+    """Suggest [[wiki-links]] to notes semantically related to the given note."""
+    return tools.suggest_links(path, k)
+
+
+@mcp.tool()
+def auto_link(path: str, k: int = 3) -> str:
+    """Insert [[wiki-links]] to the top related notes for a note and re-index."""
+    return tools.auto_link(path, k)
+
+
+@mcp.tool()
+def daily_digest(on: str = "") -> dict:
+    """Summarize notes created/edited on a day (ISO date, or today if empty)."""
+    return tools.daily_digest(on or None)
+
+
+@mcp.tool()
+def add_diary_entry(
+    body: str, author: str = "You", mood: str = "", title: str = "", on: str = ""
+) -> str:
+    """Add a dated diary entry (becomes a searchable note). on=ISO date or empty."""
+    return tools.add_diary_entry(body, author=author, mood=mood, title=title, on=on or None)
+
+
+@mcp.tool()
+def list_diary_entries(author: str = "") -> list[dict]:
+    """List diary entries newest-first, optionally filtered to one author."""
+    return tools.list_diary_entries(author or None)
 
 
 if __name__ == "__main__":

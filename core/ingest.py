@@ -10,15 +10,26 @@ import re
 from pathlib import Path
 
 try:
-    from . import config, store
+    from . import config, repo, store
 except ImportError:  # allow running directly: python core/ingest.py
     import sys
 
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from core import config, store
+    from core import config, repo, store
 
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
 _FRONTMATTER_RE = re.compile(r"^---\s*\n.*?\n---\s*\n", re.DOTALL)
+
+
+def pdf_to_text(data: bytes) -> str:
+    """Extract plain text from a PDF's bytes (page-by-page, blank-line joined)."""
+    import io
+
+    from pypdf import PdfReader
+
+    reader = PdfReader(io.BytesIO(data))
+    parts = [(page.extract_text() or "").strip() for page in reader.pages]
+    return "\n\n".join(p for p in parts if p).strip()
 
 
 def _strip_frontmatter(text: str) -> str:
@@ -89,19 +100,22 @@ def chunk_markdown(text: str, note_title: str, max_chars: int) -> list[tuple[str
 
 
 def build_index() -> dict:
-    """Re-index the whole notes/ folder. Returns a small stats dict."""
-    notes_dir: Path = config.NOTES_DIR
-    notes_dir.mkdir(parents=True, exist_ok=True)
+    """Re-index every note from the repository into the local vector store.
 
+    Pulls note content from the active backend (local files or the shared
+    Supabase vault), so in Supabase mode each client rebuilds the same index
+    from the same shared content. Returns a small stats dict.
+    """
     store.reset_collection()
 
     ids, texts, metadatas = [], [], []
-    files = sorted(notes_dir.rglob("*.md"))
+    # Skip internal config notes (e.g. meta/couple.json.md) — not real content.
+    notes = [r for r in repo.get_repo().all_notes() if not r.path.startswith("meta/")]
 
-    for path in files:
-        raw = path.read_text(encoding="utf-8")
-        rel = str(path.relative_to(notes_dir)).replace("\\", "/")
-        title = _front_matter_title(raw, fallback=path.stem)
+    for rec in notes:
+        rel = rec.path
+        raw = rec.content
+        title = _front_matter_title(raw, fallback=Path(rel).stem)
         for i, (heading, chunk_text) in enumerate(
             chunk_markdown(raw, title, config.CHUNK_MAX_CHARS)
         ):
@@ -115,7 +129,7 @@ def build_index() -> dict:
         embeddings = store.embed(texts)
         store.add_chunks(ids, texts, metadatas, embeddings)
 
-    return {"files": len(files), "chunks": len(texts)}
+    return {"files": len(notes), "chunks": len(texts)}
 
 
 if __name__ == "__main__":
