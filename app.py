@@ -8,6 +8,16 @@ Run locally:
 
 from __future__ import annotations
 
+# ChromaDB requires sqlite >= 3.35. Streamlit Cloud's system sqlite is older, so
+# swap in the pip-installed pysqlite3 there. No-op locally (package absent).
+try:
+    import sys
+
+    __import__("pysqlite3")
+    sys.modules["sqlite3"] = sys.modules.pop("pysqlite3")
+except Exception:
+    pass
+
 import os
 import random
 from datetime import date

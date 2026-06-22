@@ -10,3 +10,6 @@ markdown-it-py
 supabase
 pypdf
 Pillow
+# Streamlit Cloud ships an old system sqlite; ChromaDB needs >= 3.35.
+# This wheel is Linux-only (the app swaps it in at startup); skipped on Windows.
+pysqlite3-binary; platform_system == "Linux"
