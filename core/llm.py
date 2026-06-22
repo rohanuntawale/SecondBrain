@@ -6,6 +6,8 @@ LLM_PROVIDER env var: "ollama" (local, offline) or "groq" (free hosted API).
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 try:
     from . import config
 except ImportError:  # allow running directly: python core/llm.py
@@ -59,7 +61,7 @@ def _stream_groq(messages: list[dict]):
     try:
         client = Groq(api_key=config.GROQ_API_KEY)
         completion = client.chat.completions.create(
-            model=config.GROQ_MODEL, messages=messages, stream=True
+            model=config.GROQ_MODEL, messages=cast(Any, messages), stream=True
         )
         for chunk in completion:
             delta = chunk.choices[0].delta.content

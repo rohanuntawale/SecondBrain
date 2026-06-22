@@ -21,6 +21,14 @@ PHOTO_DIR = "photos/"
 _MAX_DIM = 1280       # longest side, px
 _JPEG_QUALITY = 82
 
+# Themed albums shown as the clickable cards on the Us page.
+ALBUMS = ["us", "for you", "love notes", "our sunsets", "celebrations", "cuddles"]
+ALBUM_EMOJI = {
+    "us": "💑", "for you": "🌹", "love notes": "💌",
+    "our sunsets": "🌅", "celebrations": "🥂", "cuddles": "🧸",
+    "general": "📸",
+}
+
 
 def _compress(data: bytes) -> bytes:
     """Resize to <= _MAX_DIM on the long side and re-encode as JPEG."""
@@ -35,32 +43,43 @@ def _compress(data: bytes) -> bytes:
     return out.getvalue()
 
 
-def add_photo(data: bytes, by: str, caption: str = "") -> str:
-    """Add a photo (raw bytes) to the shared gallery. Returns the note path."""
+def add_photo(data: bytes, by: str, caption: str = "", album: str = "general") -> str:
+    """Add a photo (raw bytes) to a themed album. Returns the note path.
+
+    The album is encoded into the path (photos/<album>/...) so albums can be
+    listed and counted cheaply without downloading image data.
+    """
     if not data:
         raise ValueError("Empty image.")
+    album = (album or "general").strip()
+    album_slug = tools._slugify(album)
     jpeg = _compress(data)
     b64 = base64.b64encode(jpeg).decode("ascii")
     stamp = datetime.now().strftime("%H%M%S%f")
-    rel = f"{PHOTO_DIR}{date.today().isoformat()}-{tools._slugify(by)}-{stamp}.md"
-    # Caption is single-line in front-matter; strip newlines to keep it valid.
-    safe_caption = " ".join(caption.split())
+    rel = (
+        f"{PHOTO_DIR}{album_slug}/"
+        f"{date.today().isoformat()}-{tools._slugify(by)}-{stamp}.md"
+    )
+    safe_caption = " ".join(caption.split())  # keep front-matter single-line
     content = (
-        f"---\ntype: photo\nby: {by}\ncaption: {safe_caption}\n"
+        f"---\ntype: photo\nby: {by}\ncategory: {album}\ncaption: {safe_caption}\n"
         f"date: {date.today().isoformat()}\nmime: image/jpeg\n---\n\n{b64}\n"
     )
     return repo.get_repo().save(rel, content)
 
 
-def list_photos(limit: int | None = None) -> list[dict]:
-    """Gallery photos newest-first: {path, by, caption, date, data(bytes)}.
+def list_photos(limit: int | None = None, album: str | None = None) -> list[dict]:
+    """Gallery photos newest-first: {path, by, caption, album, date, data(bytes)}.
 
-    `limit` fetches only the most recent N (used by the Us-page preview so it
-    doesn't pull the whole gallery's image data).
+    `album` filters to one themed album; `limit` fetches only the most recent N
+    (used by the Us-page preview so it doesn't pull the whole gallery's data).
     """
+    prefix = PHOTO_DIR
+    if album:
+        prefix = f"{PHOTO_DIR}{tools._slugify(album)}/"
     out: list[dict] = []
     # notes_under already returns newest-first (by modified time).
-    for rec in repo.get_repo().notes_under(PHOTO_DIR, limit=limit, newest_first=True):
+    for rec in repo.get_repo().notes_under(prefix, limit=limit, newest_first=True):
         f = tools._front_matter_fields(rec.content)
         b64 = ingest._strip_frontmatter(rec.content).strip()
         try:
@@ -72,11 +91,22 @@ def list_photos(limit: int | None = None) -> list[dict]:
                 "path": rec.path,
                 "by": f.get("by", "?"),
                 "caption": f.get("caption", ""),
+                "album": f.get("category", ""),
                 "date": f.get("date", ""),
                 "data": data,
             }
         )
     return out
+
+
+def album_counts() -> dict:
+    """Photo count per album — cheap (uses path list only, no image data)."""
+    paths = repo.get_repo().list_paths()
+    counts: dict = {}
+    for name in ALBUMS + ["general"]:
+        pre = f"{PHOTO_DIR}{tools._slugify(name)}/"
+        counts[name] = sum(1 for p in paths if p.startswith(pre))
+    return counts
 
 
 def delete_photo(path: str) -> None:

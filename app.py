@@ -400,6 +400,20 @@ st.markdown(
     ::-webkit-scrollbar-thumb { background: linear-gradient(#E7C95B,#C8A227); border-radius: 10px; }
     ::-webkit-scrollbar-track { background: #FBF6E9; }
     [data-testid="stAlert"] { border-radius: 12px; }
+
+    /* Clickable album cards on the Us page */
+    .st-key-albumrow button {
+        font-size: 2.1rem !important;
+        height: 80px;
+        background: linear-gradient(135deg,#FFE6F0,#FFF6E6) !important;
+        border: 1px solid #F0D6DF !important;
+        border-radius: 14px !important;
+        box-shadow: 0 4px 12px rgba(155,45,82,.12);
+    }
+    .st-key-albumrow button:hover {
+        transform: translateY(-4px) scale(1.05);
+        box-shadow: 0 10px 22px rgba(155,45,82,.22);
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -472,6 +486,12 @@ PAGES = [
     "💬 Ask", "💞 Us", "📸 Photos", "📔 Diary", "💡 Insights", "📚 Notes",
     "✍️ Create", "📰 Digest", "⬆️ Upload",
 ]
+# Allow in-app buttons (e.g. the album cards on the Us page) to switch pages:
+# they set _goto, which we apply to the nav before the widget is created.
+_goto = st.session_state.pop("_goto", None)
+if _goto in PAGES:
+    st.session_state["nav"] = _goto
+
 # A wrapping radio "nav bar" instead of st.tabs — tabs scroll off-screen on
 # phones, hiding pages; a horizontal radio wraps to multiple rows on narrow
 # screens so every page stays reachable.
@@ -560,7 +580,31 @@ elif page == "💞 Us":
         unsafe_allow_html=True,
     )
 
-    # --- Recent shared photos (real ones if added, else cute stand-ins) ---
+    # --- Album shortcuts (clickable) — tap to open that album on Photos ---
+    st.markdown("##### 📸 Our albums")
+    album_counts = photos.album_counts()
+    with st.container(key="albumrow"):
+        acols = st.columns(len(photos.ALBUMS))
+        for i, name in enumerate(photos.ALBUMS):
+            with acols[i]:
+                if st.button(
+                    photos.ALBUM_EMOJI[name],
+                    key=f"album_{name}",
+                    use_container_width=True,
+                    help=f"Open the “{name}” album",
+                ):
+                    st.session_state["_goto"] = "📸 Photos"
+                    st.session_state["_album"] = name
+                    st.rerun()
+                n = album_counts.get(name, 0)
+                label = f"{name} · {n}" if n else name
+                st.markdown(
+                    f"<div style='text-align:center;color:#9B2D52;"
+                    f"font-style:italic;font-size:.78rem'>{label}</div>",
+                    unsafe_allow_html=True,
+                )
+
+    # Recent photos strip
     recent_photos = photos.list_photos(limit=6)
     if recent_photos:
         st.markdown("##### 📸 Recent memories")
@@ -571,17 +615,7 @@ elif page == "💞 Us":
                          use_container_width=True)
         st.caption("See them all on the 📸 Photos page.")
     else:
-        pics = [
-            ("💑", "us"), ("🌹", "for you"), ("💌", "love notes"),
-            ("🌅", "our sunsets"), ("🥂", "celebrations"), ("🧸", "cuddles"),
-        ]
-        cards = "".join(
-            f'<div class="polaroid"><div class="pic">{e}</div>'
-            f'<div class="cap">{c}</div></div>'
-            for e, c in pics
-        )
-        st.markdown(f'<div class="polaroid-row">{cards}</div>', unsafe_allow_html=True)
-        st.caption("💡 Add your own pictures on the 📸 Photos page — they'll appear here.")
+        st.caption("💡 Tap an album above to add your first photos. 💞")
 
     # --- Two counters: official + unofficial ---
     def _counter_card(col, bd, title, emoji, color):
@@ -786,9 +820,15 @@ elif page == "💞 Us":
 elif page == "📸 Photos":
     st.subheader("📸 Our photos")
     st.caption(
-        "Upload pictures of each other — you both see every photo (shared vault). "
-        "Images are auto-compressed so they stay light."
+        "Upload pictures into themed albums — you both see every photo (shared "
+        "vault). Images are auto-compressed so they stay light."
     )
+
+    # Arriving from an album card on the Us page → preselect that album.
+    arrived = st.session_state.pop("_album", None)
+    if arrived in photos.ALBUMS or arrived == "general":
+        st.session_state["photo_album_sel"] = arrived
+        st.session_state["photo_view"] = arrived
 
     up = st.file_uploader(
         "Add photos",
@@ -796,29 +836,51 @@ elif page == "📸 Photos":
         accept_multiple_files=True,
         key="photo_uploader",
     )
-    pc1, pc2 = st.columns([1, 2])
+    pc1, pc2, pc3 = st.columns([1, 1, 2])
     with pc1:
         ph_by = st.radio("Added by", USERS, horizontal=True, key="photo_by")
     with pc2:
+        ph_album = st.selectbox(
+            "Album",
+            photos.ALBUMS + ["general"],
+            key="photo_album_sel",
+            format_func=lambda a: f"{photos.ALBUM_EMOJI.get(a, '📸')} {a}",
+        )
+    with pc3:
         ph_cap = st.text_input("Caption (optional)", key="photo_caption")
     if up and st.button("⬆️ Add to gallery", type="primary"):
         ok = 0
         with st.spinner("Saving photos..."):
             for f in up:
                 try:
-                    photos.add_photo(f.getvalue(), by=ph_by, caption=ph_cap)
+                    photos.add_photo(f.getvalue(), by=ph_by, caption=ph_cap, album=ph_album)
                     ok += 1
                 except Exception as e:
                     st.error(f"{f.name}: {e}")
         if ok:
-            st.success(f"Added {ok} photo(s) 📸")
+            st.success(f"Added {ok} photo(s) to “{ph_album}” 📸")
             st.balloons()
             st.rerun()
 
     st.markdown("---")
-    gallery = photos.list_photos()
+    counts = photos.album_counts()
+
+    def _view_label(a):
+        if a == "all":
+            return "🗂️ all"
+        return f"{photos.ALBUM_EMOJI.get(a, '📸')} {a} ({counts.get(a, 0)})"
+
+    view_album = st.radio(
+        "Show",
+        ["all", *photos.ALBUMS, "general"],
+        horizontal=True,
+        key="photo_view",
+        format_func=_view_label,
+    )
+
+    gallery = photos.list_photos(album=None if view_album == "all" else view_album)
     if not gallery:
-        st.info("No photos yet — add your first memory above. 💞")
+        st.info("No photos here yet — add some above. 💞")
     else:
         st.caption(f"{len(gallery)} photo(s)")
         gcols = st.columns(3)
