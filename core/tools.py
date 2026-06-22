@@ -15,13 +15,9 @@ from . import ingest, llm, repo, store
 
 _LINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
 
-# Internal/config notes (e.g. meta/couple.json.md) are hidden from listings.
-_HIDDEN_PREFIX = "meta/"
-
-
 def _content_notes():
-    """All real content notes (excludes internal config under meta/)."""
-    return [r for r in repo.get_repo().all_notes() if not r.path.startswith(_HIDDEN_PREFIX)]
+    """All real content notes (excludes internal namespaces: config/love/photos)."""
+    return repo.get_repo().content_notes()
 
 
 def _slugify(title: str) -> str:
@@ -64,7 +60,8 @@ def read_note(path: str) -> str:
 def list_notes() -> list[str]:
     """All note paths in the vault (excludes internal config notes)."""
     return sorted(
-        p for p in repo.get_repo().list_paths() if not p.startswith(_HIDDEN_PREFIX)
+        p for p in repo.get_repo().list_paths()
+        if not p.startswith(ingest.HIDDEN_PREFIXES)
     )
 
 

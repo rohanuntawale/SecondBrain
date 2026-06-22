@@ -100,6 +100,22 @@ class FileRepo:
     def list_paths(self) -> list[str]:
         return sorted(n.path for n in self.all_notes())
 
+    def content_notes(self) -> list[NoteRecord]:
+        return [
+            n for n in self.all_notes()
+            if not n.path.startswith(config.HIDDEN_PREFIXES)
+        ]
+
+    def notes_under(
+        self, prefix: str, limit: int | None = None, newest_first: bool = False
+    ) -> list[NoteRecord]:
+        items = [n for n in self.all_notes() if n.path.startswith(prefix)]
+        if newest_first:
+            items.sort(key=lambda n: n.updated, reverse=True)
+        else:
+            items.sort(key=lambda n: n.path)
+        return items[:limit] if limit else items
+
 
 # --- Supabase (shared cloud) backend ------------------------------------------
 
@@ -161,6 +177,30 @@ class SupabaseRepo:
     def list_paths(self) -> list[str]:
         res = self.client.table(self.TABLE).select("path").order("path").execute()
         return sorted(r["path"] for r in (res.data or []))
+
+    def content_notes(self) -> list[NoteRecord]:
+        """Real content notes — excludes hidden namespaces server-side (no big
+        photo blobs transferred for ordinary note listings/indexing)."""
+        q = self.client.table(self.TABLE).select("*")
+        for pre in config.HIDDEN_PREFIXES:
+            q = q.not_.like("path", f"{pre}%")
+        res = q.order("path").execute()
+        return [self._row(r) for r in (res.data or [])]
+
+    def notes_under(
+        self, prefix: str, limit: int | None = None, newest_first: bool = False
+    ) -> list[NoteRecord]:
+        order_col = "updated_at" if newest_first else "path"
+        q = (
+            self.client.table(self.TABLE)
+            .select("*")
+            .like("path", f"{prefix}%")
+            .order(order_col, desc=newest_first)
+        )
+        if limit:
+            q = q.limit(limit)
+        res = q.execute()
+        return [self._row(r) for r in (res.data or [])]
 
 
 def _parse_ts(value) -> datetime:

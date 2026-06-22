@@ -12,14 +12,15 @@ tools.py), so it never pollutes search results.
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import date, datetime
 
-from . import llm, repo, tools
+from . import ingest, llm, repo, tools
 
 SETTINGS_PATH = "meta/couple.json.md"
 
 _DEFAULTS: dict = {
-    "start_date": "",        # ISO date the relationship started
+    "start_date": "",        # ISO date — the "official" anniversary (primary counter)
+    "unofficial_date": "",   # ISO date — when you unofficially started (2nd counter)
     "important_dates": [],   # [{"label": str, "date": "MM-DD"}]
     "date_jar": [],          # list of saved date-idea strings
 }
@@ -53,13 +54,12 @@ def save_settings(settings: dict) -> None:
 
 # --- relationship counter & countdowns ---------------------------------------
 
-def days_together(today: date | None = None) -> dict | None:
-    """Return {'days', 'years', 'months', 'rem_days', 'start'} or None if unset."""
-    s = load_settings().get("start_date", "")
-    if not s:
+def days_breakdown(start_iso: str, today: date | None = None) -> dict | None:
+    """Return {'days','years','months','rem_days','start'} for an ISO date, or None."""
+    if not start_iso:
         return None
     try:
-        start = date.fromisoformat(s)
+        start = date.fromisoformat(start_iso)
     except ValueError:
         return None
     today = today or date.today()
@@ -78,8 +78,18 @@ def days_together(today: date | None = None) -> dict | None:
         "years": max(years, 0),
         "months": max(months, 0),
         "rem_days": max(days, 0),
-        "start": s,
+        "start": start_iso,
     }
+
+
+def days_together(today: date | None = None) -> dict | None:
+    """Days since the official start date (primary counter)."""
+    return days_breakdown(load_settings().get("start_date", ""), today)
+
+
+def days_unofficial(today: date | None = None) -> dict | None:
+    """Days since the unofficial start date (secondary counter)."""
+    return days_breakdown(load_settings().get("unofficial_date", ""), today)
 
 
 def upcoming_dates(today: date | None = None, within_days: int = 365) -> list[dict]:
@@ -175,6 +185,47 @@ def date_idea(context: str = "") -> str:
         return llm.chat(system, user).strip().strip('"')
     except llm.LLMError as e:
         return f"[Set up an LLM to generate ideas] ({e})"
+
+
+LOVE_DIR = "love/"
+
+
+def add_love_message(sender: str, recipient: str, message: str) -> str:
+    """Save a romantic note from `sender` to `recipient` in the shared vault.
+
+    Stored under love/ (hidden from search and note listings). The recipient
+    sees it in the "For You" inbox. Returns the note's path.
+    """
+    message = message.strip()
+    if not message:
+        raise ValueError("Write something sweet first 💕")
+    stamp = datetime.now().strftime("%H%M%S")
+    rel = f"{LOVE_DIR}{date.today().isoformat()}-{tools._slugify(sender)}-{stamp}.md"
+    content = (
+        f"---\ntype: love\nfrom: {sender}\nto: {recipient}\n"
+        f"date: {date.today().isoformat()}\n---\n\n{message}\n"
+    )
+    return repo.get_repo().save(rel, content)
+
+
+def list_love_messages(recipient: str | None = None) -> list[dict]:
+    """Romantic notes newest-first; optionally only those addressed to `recipient`."""
+    out: list[dict] = []
+    for rec in repo.get_repo().notes_under(LOVE_DIR):
+        f = tools._front_matter_fields(rec.content)
+        if recipient and f.get("to", "").lower() != recipient.lower():
+            continue
+        out.append(
+            {
+                "path": rec.path,
+                "from": f.get("from", "?"),
+                "to": f.get("to", "?"),
+                "date": f.get("date", ""),
+                "message": ingest._strip_frontmatter(rec.content).strip(),
+            }
+        )
+    out.sort(key=lambda m: (m["date"], m["path"]), reverse=True)
+    return out
 
 
 def add_date_idea(idea: str) -> None:

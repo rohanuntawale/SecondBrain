@@ -45,6 +45,10 @@ SUPABASE_KEY: str = os.getenv("SUPABASE_KEY", "").strip()
 # Collection name inside ChromaDB.
 COLLECTION_NAME: str = "notes"
 
+# Internal note namespaces excluded from search/indexing and normal listings:
+#   meta/ → app config, love/ → private love notes, photos/ → gallery images.
+HIDDEN_PREFIXES: tuple[str, ...] = ("meta/", "love/", "photos/")
+
 
 def summary() -> str:
     """Human-readable config dump (used by `python -m core.config`)."""

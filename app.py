@@ -30,7 +30,7 @@ except Exception:
 
 import pandas as pd  # noqa: E402
 
-from core import config, couple, ingest, rag, store, tools  # noqa: E402
+from core import config, couple, ingest, photos, rag, store, tools  # noqa: E402
 
 st.set_page_config(page_title="SecondBrain", page_icon="🧠", layout="wide")
 
@@ -58,6 +58,25 @@ def author_chip(author: str) -> str:
         f'padding:1px 9px;border-radius:11px;font-size:.74rem;'
         f'font-weight:600;white-space:nowrap;">{label}</span>'
     )
+
+
+_HEART_EMOJIS = ["❤️", "💕", "💖", "💗", "💛", "🌹", "💞", "💘"]
+
+
+def hearts_html(n: int = 16) -> str:
+    """Build floating-heart particles for the romantic banner (varied + lively)."""
+    spans = []
+    for i in range(n):
+        left = round(3 + (94 * i / n) + random.uniform(-3, 3), 1)
+        size = random.randint(13, 27)
+        delay = round(random.uniform(0, 6), 2)
+        dur = round(random.uniform(4.5, 8), 2)
+        emo = _HEART_EMOJIS[i % len(_HEART_EMOJIS)]
+        spans.append(
+            f'<span class="heart" style="left:{left}%;font-size:{size}px;'
+            f'animation-delay:{delay}s;animation-duration:{dur}s;">{emo}</span>'
+        )
+    return "".join(spans)
 
 st.markdown(
     f"""
@@ -154,6 +173,59 @@ st.markdown(
     /* Spinner tinted gold */
     .stSpinner > div {{ border-top-color: {GOLD} !important; }}
 
+    /* ---- Romance (Us page): hearts, heartbeat, polaroids ---- */
+    @keyframes floatUp {{
+        0%   {{ transform: translateY(0) scale(.5); opacity: 0; }}
+        12%  {{ opacity: .95; }}
+        100% {{ transform: translateY(-165px) scale(1.15); opacity: 0; }}
+    }}
+    @keyframes heartbeat {{
+        0%,30%,100% {{ transform: scale(1); }}
+        8%  {{ transform: scale(1.13); }}
+        16% {{ transform: scale(1); }}
+        24% {{ transform: scale(1.08); }}
+    }}
+    @keyframes sparkle {{
+        0%,100% {{ opacity:.35; transform: scale(.8) rotate(0); }}
+        50%     {{ opacity:1; transform: scale(1.25) rotate(18deg); }}
+    }}
+    .us-banner {{
+        position: relative; overflow: hidden; text-align: center;
+        background: linear-gradient(120deg,#FFE0EC 0%, #FBF1D6 45%, #FFD9E8 100%);
+        background-size: 200% 200%;
+        animation: sbGradient 10s ease infinite;
+        border: 1px solid #F2C9D8; border-radius: 18px;
+        padding: 1.7rem 1rem 1.5rem; margin-bottom: 1rem;
+        box-shadow: 0 8px 26px rgba(214,51,108,.16);
+    }}
+    .us-banner .names {{
+        font-size: 2rem; font-weight: 700; color: #9B2D52;
+        position: relative; z-index: 1; display: inline-block;
+        animation: heartbeat 2.6s ease-in-out infinite;
+    }}
+    .us-banner .tag {{ color:#7A5C12; margin-top:.2rem; font-size:1rem; position:relative; z-index:1; }}
+    .us-banner .heart {{
+        position: absolute; bottom: -14px;
+        animation: floatUp 6s linear infinite; pointer-events: none;
+    }}
+    .us-banner .spark {{ position:absolute; top:12px; animation: sparkle 2.4s ease-in-out infinite; }}
+
+    .polaroid-row {{ display:flex; flex-wrap:wrap; gap:.7rem; justify-content:center; margin:.3rem 0 .5rem; }}
+    .polaroid {{
+        background:#fff; border:1px solid #F0D6DF; border-radius:10px;
+        padding:.55rem .55rem .4rem; width:104px; text-align:center;
+        box-shadow:0 4px 12px rgba(155,45,82,.12);
+        animation: sbFadeUp .6s ease both;
+        transition: transform .2s ease, box-shadow .2s ease;
+    }}
+    .polaroid:nth-child(odd)  {{ transform: rotate(-3deg); }}
+    .polaroid:nth-child(even) {{ transform: rotate(3deg); }}
+    .polaroid:hover {{ transform: rotate(0) translateY(-5px) scale(1.06); box-shadow:0 10px 22px rgba(155,45,82,.22); }}
+    .polaroid .pic {{ font-size:2.4rem; background:linear-gradient(135deg,#FFE6F0,#FFF6E6); border-radius:7px; padding:.45rem 0; }}
+    .polaroid .cap {{ font-size:.78rem; color:#9B2D52; margin-top:.35rem; font-style:italic; }}
+
+    .love-counter {{ animation: heartbeat 2.6s ease-in-out infinite; display:inline-block; }}
+
     /* Radio groups (nav bar, mode & author pickers) wrap on narrow screens
        instead of overflowing, so every option stays reachable on a phone. */
     div[role="radiogroup"] {{ flex-wrap: wrap; gap: .25rem .7rem; }}
@@ -179,6 +251,133 @@ st.markdown(
         div[data-testid="stHorizontalBlock"] {{ flex-direction: column; }}
         .stTabs [data-baseweb="tab"] {{ padding: .3rem .6rem; }}
     }}
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+st.markdown(
+    """
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap');
+
+    html, body, [class*="css"], .stApp, .stMarkdown, input, textarea, button, select {
+        font-family: 'Poppins', sans-serif !important;
+    }
+
+    /* Soft animated ambient background with drifting glow blobs */
+    .stApp {
+        background:
+            radial-gradient(1000px circle at 0% -10%, rgba(231,201,91,.20), transparent 42%),
+            radial-gradient(900px circle at 100% 0%, rgba(214,51,108,.13), transparent 42%),
+            radial-gradient(1000px circle at 50% 120%, rgba(231,201,91,.12), transparent 45%),
+            #FFFDFA !important;
+        background-attachment: fixed !important;
+    }
+    .stApp::before, .stApp::after {
+        content:""; position:fixed; border-radius:50%; z-index:0;
+        pointer-events:none; filter: blur(26px);
+    }
+    .stApp::before {
+        width:340px; height:340px; top:-90px; left:-70px;
+        background: radial-gradient(circle, rgba(231,201,91,.30), transparent 70%);
+        animation: floatBlob 17s ease-in-out infinite alternate;
+    }
+    .stApp::after {
+        width:300px; height:300px; bottom:-80px; right:-60px;
+        background: radial-gradient(circle, rgba(214,51,108,.22), transparent 70%);
+        animation: floatBlob2 21s ease-in-out infinite alternate;
+    }
+    @keyframes floatBlob  { from{transform:translate(0,0)} to{transform:translate(70px,50px)} }
+    @keyframes floatBlob2 { from{transform:translate(0,0)} to{transform:translate(-60px,-40px)} }
+
+    /* Keep content above the blobs + a gentle entrance */
+    [data-testid="stMain"] .block-container {
+        position: relative; z-index: 1;
+        animation: sbFadeUp .55s ease both;
+    }
+
+    /* Warm, bold section headings with a gradient accent underline */
+    [data-testid="stMarkdownContainer"] h2,
+    [data-testid="stMarkdownContainer"] h3,
+    [data-testid="stMarkdownContainer"] h4,
+    [data-testid="stMarkdownContainer"] h5 {
+        color: #9C6B16 !important; font-weight: 700 !important; letter-spacing:.2px;
+    }
+    [data-testid="stMarkdownContainer"] h3::after {
+        content:""; display:block; width:54px; height:3px; margin-top:7px;
+        background: linear-gradient(90deg,#C8A227,#D6336C); border-radius:3px;
+    }
+
+    /* Glassy cards */
+    .sb-card {
+        background: rgba(255,255,255,.72) !important;
+        backdrop-filter: blur(9px); -webkit-backdrop-filter: blur(9px);
+    }
+
+    /* Buttons: rounded, with a shine sweep on hover */
+    .stButton > button {
+        position: relative; overflow: hidden;
+        border-radius: 12px !important; font-weight: 600 !important;
+    }
+    .stButton > button::after {
+        content:""; position:absolute; top:0; left:-130%; width:55%; height:100%;
+        background: linear-gradient(100deg, transparent, rgba(255,255,255,.55), transparent);
+        transform: skewX(-18deg); transition: left .55s ease;
+    }
+    .stButton > button:hover::after { left: 150%; }
+
+    /* Inputs: rounded + gold focus glow */
+    .stTextInput input, .stTextArea textarea, .stNumberInput input,
+    [data-baseweb="input"], [data-baseweb="select"] > div, [data-baseweb="textarea"] {
+        border-radius: 11px !important;
+    }
+    .stTextInput input:focus, .stTextArea textarea:focus {
+        border-color: #C8A227 !important;
+        box-shadow: 0 0 0 3px rgba(200,162,39,.18) !important;
+    }
+
+    /* Radio "pills" — nav bar + mode/author pickers */
+    div[role="radiogroup"] > label {
+        background: rgba(255,255,255,.7);
+        border: 1px solid #EAD9A0; border-radius: 999px;
+        padding: .32rem .9rem !important; margin: 0 !important;
+        transition: transform .16s ease, box-shadow .16s ease, background .2s ease;
+        backdrop-filter: blur(6px);
+    }
+    div[role="radiogroup"] > label:hover {
+        transform: translateY(-2px); box-shadow: 0 5px 14px rgba(200,162,39,.22);
+    }
+    div[role="radiogroup"] > label:has(input:checked) {
+        background: linear-gradient(135deg,#E7C95B,#C8A227);
+        border-color: #A67C00; box-shadow: 0 5px 16px rgba(200,162,39,.34);
+    }
+
+    /* Expanders + uploader polish */
+    [data-testid="stExpander"] {
+        border: 1px solid #EAD9A0 !important; border-radius: 13px !important;
+        background: rgba(255,255,255,.6); overflow: hidden;
+    }
+    [data-testid="stFileUploaderDropzone"] {
+        border-radius: 13px !important; border: 1.5px dashed #E0B94B !important;
+        background: rgba(251,246,233,.6) !important; transition: all .2s ease;
+    }
+    [data-testid="stFileUploaderDropzone"]:hover { background: rgba(247,230,184,.7) !important; }
+
+    /* Images: rounded + lift on hover */
+    [data-testid="stImage"] img {
+        border-radius: 12px; transition: transform .2s ease, box-shadow .2s ease;
+        box-shadow: 0 4px 14px rgba(0,0,0,.08);
+    }
+    [data-testid="stImage"]:hover img {
+        transform: scale(1.02); box-shadow: 0 10px 24px rgba(214,51,108,.18);
+    }
+
+    /* Gold scrollbar + rounded alerts */
+    ::-webkit-scrollbar { width: 10px; height: 10px; }
+    ::-webkit-scrollbar-thumb { background: linear-gradient(#E7C95B,#C8A227); border-radius: 10px; }
+    ::-webkit-scrollbar-track { background: #FBF6E9; }
+    [data-testid="stAlert"] { border-radius: 12px; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -240,7 +439,8 @@ with st.sidebar:
 
 # --- Tabs ---------------------------------------------------------------------
 PAGES = [
-    "💬 Ask", "💞 Us", "📔 Diary", "📚 Notes", "✍️ Create", "📰 Digest", "⬆️ Upload"
+    "💬 Ask", "💞 Us", "📸 Photos", "📔 Diary", "📚 Notes",
+    "✍️ Create", "📰 Digest", "⬆️ Upload",
 ]
 # A wrapping radio "nav bar" instead of st.tabs — tabs scroll off-screen on
 # phones, hiding pages; a horizontal radio wraps to multiple rows on narrow
@@ -286,45 +486,77 @@ if page == "💬 Ask":
 
 # Us (couple dashboard) -------------------------------------------------------
 elif page == "💞 Us":
-    st.subheader("💞 Us")
     settings = couple.load_settings()
 
-    # --- Relationship counter + upcoming countdowns ---
-    dt = couple.days_together()
-    col_a, col_b = st.columns([1, 1])
-    with col_a:
-        if dt:
-            st.markdown(
-                f"""
-                <div class="sb-card" style="border-left-color:{GOLD};">
-                    <div class="meta">Together since {dt['start']}</div>
-                    <div class="body" style="font-size:1.5rem;">
-                        💛 <b>{dt['days']}</b> days
-                        <span style="font-size:.95rem;color:#5C4A12;">
-                        ({dt['years']}y {dt['months']}m {dt['rem_days']}d)</span>
-                    </div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-        else:
-            st.info("Set your start date in **⚙️ Setup** below to start the counter.")
-    with col_b:
-        ups = couple.upcoming_dates()
-        if ups:
-            lines = "".join(
-                f"<div class='body'>🎉 <b>{u['label']}</b> in "
-                f"<b>{u['days_until']}</b> day(s) <span style='color:#888'>"
-                f"({u['next']})</span></div>"
-                for u in ups[:4]
-            )
-            st.markdown(
-                f'<div class="sb-card" style="border-left-color:{AUTHOR_COLORS["Pooja"]};">'
-                f'<div class="meta">Upcoming</div>{lines}</div>',
-                unsafe_allow_html=True,
-            )
-        else:
-            st.caption("Add birthdays/anniversaries in ⚙️ Setup for countdowns.")
+    # --- Romantic animated banner (floating hearts + heartbeat) ---
+    st.markdown(
+        f'<div class="us-banner">{hearts_html()}'
+        f'<span class="spark" style="left:11%">✨</span>'
+        f'<span class="spark" style="right:11%;top:18px">✨</span>'
+        f'<div class="names">{USERS[0]}&nbsp;💞&nbsp;{USERS[1]}</div>'
+        f'<div class="tag">together &amp; growing 🌹</div></div>',
+        unsafe_allow_html=True,
+    )
+
+    # --- Recent shared photos (real ones if added, else cute stand-ins) ---
+    recent_photos = photos.list_photos(limit=6)
+    if recent_photos:
+        st.markdown("##### 📸 Recent memories")
+        rcols = st.columns(min(len(recent_photos), 3))
+        for i, ph in enumerate(recent_photos):
+            with rcols[i % len(rcols)]:
+                st.image(ph["data"], caption=(ph["caption"] or ph["by"]),
+                         use_container_width=True)
+        st.caption("See them all on the 📸 Photos page.")
+    else:
+        pics = [
+            ("💑", "us"), ("🌹", "for you"), ("💌", "love notes"),
+            ("🌅", "our sunsets"), ("🥂", "celebrations"), ("🧸", "cuddles"),
+        ]
+        cards = "".join(
+            f'<div class="polaroid"><div class="pic">{e}</div>'
+            f'<div class="cap">{c}</div></div>'
+            for e, c in pics
+        )
+        st.markdown(f'<div class="polaroid-row">{cards}</div>', unsafe_allow_html=True)
+        st.caption("💡 Add your own pictures on the 📸 Photos page — they'll appear here.")
+
+    # --- Two counters: official + unofficial ---
+    def _counter_card(col, bd, title, emoji, color):
+        with col:
+            if bd:
+                st.markdown(
+                    f'<div class="sb-card" style="border-left-color:{color};text-align:center;">'
+                    f'<div class="meta">{title} · since {bd["start"]}</div>'
+                    f'<div class="body"><span class="love-counter" style="font-size:1.7rem;">'
+                    f'{emoji} <b>{bd["days"]}</b> days</span></div>'
+                    f'<div class="meta">{bd["years"]}y {bd["months"]}m {bd["rem_days"]}d</div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.info("Set this date in ⚙️ Setup below.")
+
+    cc1, cc2 = st.columns(2)
+    _counter_card(cc1, couple.days_together(), "Official 💍", "💖", AUTHOR_COLORS["Pooja"])
+    _counter_card(cc2, couple.days_unofficial(), "Unofficial 💞", "💛", GOLD)
+
+    # --- Upcoming anniversaries / birthdays ---
+    ups = couple.upcoming_dates()
+    if ups:
+        lines = "".join(
+            f"<div class='body'>🎉 <b>{u['label']}</b> in "
+            f"<b>{u['days_until']}</b> day(s) <span style='color:#888'>"
+            f"({u['next']})</span></div>"
+            for u in ups[:4]
+        )
+        st.markdown(
+            f'<div class="sb-card" style="border-left-color:{GOLD_DARK};">'
+            f'<div class="meta">Upcoming</div>{lines}</div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        st.caption("Add birthdays/anniversaries in ⚙️ Setup for countdowns.")
 
     # --- On this day ---
     st.markdown("#### 📅 On this day")
@@ -353,21 +585,59 @@ elif page == "💞 Us":
     else:
         st.caption("Pick a mood when writing diary entries to see trends here.")
 
-    # --- Daily love note ---
-    st.markdown("#### 💌 Love note")
-    lc1, lc2 = st.columns([1, 2])
-    with lc1:
-        recipient = st.selectbox("To", USERS, key="lovenote_to")
-    sender = next(u for u in USERS if u != recipient)
-    if st.button(f"💌 Write a note for {recipient}"):
-        with st.spinner("Composing..."):
-            note = couple.love_note(sender, recipient)
+    # --- For You: write & receive romantic notes ---
+    st.markdown("#### 💌 For You")
+    # Clear the editor on the run after a send (must happen before the widget).
+    if st.session_state.pop("_love_clear", False):
+        st.session_state["love_msg_area"] = ""
+
+    fc1, fc2 = st.columns([1, 1])
+    with fc1:
+        love_from = st.radio("From", USERS, horizontal=True, key="love_from")
+    love_to = next(u for u in USERS if u != love_from)
+    with fc2:
         st.markdown(
-            f'<div class="sb-card" style="border-left-color:{author_color(sender)};">'
-            f'<div class="meta">From {sender} to {recipient}</div>'
-            f'<div class="body" style="font-style:italic;">“{note}”</div></div>',
+            f"<div style='padding-top:1.9rem;'>To "
+            f"<b style='color:{author_color(love_to)}'>{love_to}</b> 💞</div>",
             unsafe_allow_html=True,
         )
+
+    if st.button("✨ Help me write (AI)"):
+        with st.spinner("Finding the words..."):
+            st.session_state["love_msg_area"] = couple.love_note(love_from, love_to)
+        st.rerun()
+
+    love_msg = st.text_area(
+        f"Your note for {love_to}",
+        key="love_msg_area",
+        placeholder="Write something sweet…",
+        height=110,
+    )
+    if st.button(f"💝 Send to {love_to}", type="primary"):
+        if love_msg.strip():
+            couple.add_love_message(love_from, love_to, love_msg)
+            st.session_state["_love_clear"] = True
+            st.success(f"Sent to {love_to} 💞")
+            st.balloons()
+            st.rerun()
+        else:
+            st.warning("Write something sweet first 💕")
+
+    # Inbox — notes addressed to a person
+    st.markdown("##### 💞 Notes received")
+    inbox_who = st.selectbox("Show notes for", USERS, key="love_inbox_who")
+    msgs = couple.list_love_messages(inbox_who)
+    if not msgs:
+        st.caption(f"No notes for {inbox_who} yet — write the first one above 💕")
+    else:
+        for m in msgs:
+            st.markdown(
+                f'<div class="sb-card" style="border-left-color:{author_color(m["from"])};">'
+                f'<div class="meta">💌 From {m["from"]} · {m["date"]}</div>'
+                f'<div class="body" style="font-style:italic;">“{m["message"]}”</div>'
+                f"</div>",
+                unsafe_allow_html=True,
+            )
 
     # --- Date-idea jar ---
     st.markdown("#### 🫙 Date-idea jar")
@@ -403,11 +673,23 @@ elif page == "💞 Us":
                 st.markdown(f"{i}. {idea}")
 
     # --- Setup ---
-    with st.expander("⚙️ Setup (start date & important dates)"):
+    with st.expander("⚙️ Setup (dates & anniversaries)"):
         start_raw = settings.get("start_date", "")
         start_val = date.fromisoformat(start_raw) if start_raw else None
-        new_start = st.date_input("Relationship start date", value=start_val)
-        st.caption("Important dates (label + date). Add rows as needed.")
+        uno_raw = settings.get("unofficial_date", "")
+        uno_val = date.fromisoformat(uno_raw) if uno_raw else None
+        sc1, sc2 = st.columns(2)
+        with sc1:
+            new_start = st.date_input(
+                "Official start date 💍", value=start_val,
+                min_value=date(2000, 1, 1),
+            )
+        with sc2:
+            new_uno = st.date_input(
+                "Unofficial start date 💞", value=uno_val,
+                min_value=date(2000, 1, 1),
+            )
+        st.caption("Important dates (label + date as MM-DD). Add rows as needed.")
         existing = settings.get("important_dates", [])
         dates_df = pd.DataFrame(existing or [{"label": "", "date": ""}])
         edited = st.data_editor(
@@ -429,12 +711,66 @@ elif page == "💞 Us":
             couple.save_settings(
                 {
                     "start_date": new_start.isoformat() if new_start else "",
+                    "unofficial_date": new_uno.isoformat() if new_uno else "",
                     "important_dates": cleaned,
                     "date_jar": settings.get("date_jar", []),
                 }
             )
             st.success("Saved! 💛")
             st.rerun()
+
+
+# Photos (shared gallery) -----------------------------------------------------
+elif page == "📸 Photos":
+    st.subheader("📸 Our photos")
+    st.caption(
+        "Upload pictures of each other — you both see every photo (shared vault). "
+        "Images are auto-compressed so they stay light."
+    )
+
+    up = st.file_uploader(
+        "Add photos",
+        type=["png", "jpg", "jpeg", "webp", "bmp"],
+        accept_multiple_files=True,
+        key="photo_uploader",
+    )
+    pc1, pc2 = st.columns([1, 2])
+    with pc1:
+        ph_by = st.radio("Added by", USERS, horizontal=True, key="photo_by")
+    with pc2:
+        ph_cap = st.text_input("Caption (optional)", key="photo_caption")
+    if up and st.button("⬆️ Add to gallery", type="primary"):
+        ok = 0
+        with st.spinner("Saving photos..."):
+            for f in up:
+                try:
+                    photos.add_photo(f.getvalue(), by=ph_by, caption=ph_cap)
+                    ok += 1
+                except Exception as e:
+                    st.error(f"{f.name}: {e}")
+        if ok:
+            st.success(f"Added {ok} photo(s) 📸")
+            st.balloons()
+            st.rerun()
+
+    st.markdown("---")
+    gallery = photos.list_photos()
+    if not gallery:
+        st.info("No photos yet — add your first memory above. 💞")
+    else:
+        st.caption(f"{len(gallery)} photo(s)")
+        gcols = st.columns(3)
+        for i, ph in enumerate(gallery):
+            with gcols[i % 3]:
+                cap = ph["caption"] or "—"
+                st.image(ph["data"], use_container_width=True)
+                st.markdown(
+                    f"{author_chip(ph['by'])} &nbsp; *{cap}*",
+                    unsafe_allow_html=True,
+                )
+                if st.button("🗑️ Remove", key=f"delphoto_{ph['path']}"):
+                    photos.delete_photo(ph["path"])
+                    st.rerun()
 
 
 # Diary -----------------------------------------------------------------------

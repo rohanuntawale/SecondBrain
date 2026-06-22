@@ -20,6 +20,10 @@ except ImportError:  # allow running directly: python core/ingest.py
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
 _FRONTMATTER_RE = re.compile(r"^---\s*\n.*?\n---\s*\n", re.DOTALL)
 
+# Re-exported for callers that filter on note namespaces (defined in config to
+# avoid an import cycle with repo).
+HIDDEN_PREFIXES = config.HIDDEN_PREFIXES
+
 
 def pdf_to_text(data: bytes) -> str:
     """Extract plain text from a PDF's bytes (page-by-page, blank-line joined)."""
@@ -109,8 +113,8 @@ def build_index() -> dict:
     store.reset_collection()
 
     ids, texts, metadatas = [], [], []
-    # Skip internal config notes (e.g. meta/couple.json.md) — not real content.
-    notes = [r for r in repo.get_repo().all_notes() if not r.path.startswith("meta/")]
+    # Only real content notes (hidden namespaces excluded server-side).
+    notes = repo.get_repo().content_notes()
 
     for rec in notes:
         rel = rec.path
