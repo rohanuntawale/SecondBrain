@@ -48,14 +48,155 @@ def _format_context(docs, metas) -> str:
     return "\n\n---\n\n".join(blocks)
 
 
+from functools import lru_cache
+
+
+@lru_cache(maxsize=1)
+def _reranker():
+    """Load the cross-encoder reranker once (lazy; ~80MB)."""
+    from sentence_transformers import CrossEncoder
+
+    return CrossEncoder(config.RERANK_MODEL)
+
+
+def _hyde_query(question: str) -> str:
+    """HyDE: draft a hypothetical answer to embed instead of the bare question.
+
+    A passage-shaped query sits closer to real note chunks in embedding space
+    than a terse question does, improving recall. Falls back to the original
+    question if no LLM is reachable.
+    """
+    system = (
+        "Write a short, factual paragraph (2-3 sentences) that would plausibly "
+        "answer the user's question, as if excerpted from their personal notes. "
+        "Do not say you are unsure; just write the passage."
+    )
+    try:
+        draft = llm.chat(system, question).strip()
+    except llm.LLMError:
+        return question
+    # Keep the original question terms too, so keyword signal isn't lost.
+    return f"{question}\n{draft}" if draft else question
+
+
+def _rerank(question: str, docs: list, metas: list, k: int):
+    """Re-score (doc, meta) pairs with a cross-encoder and keep the top k."""
+    if not docs:
+        return docs, metas
+    try:
+        scores = _reranker().predict([(question, d) for d in docs])
+    except Exception:
+        return docs[:k], metas[:k]  # degrade gracefully to retrieval order
+    order = sorted(range(len(docs)), key=lambda i: float(scores[i]), reverse=True)[:k]
+    return [docs[i] for i in order], [metas[i] for i in order]
+
+
 def retrieve(question: str, k: int | None = None):
-    """Return (documents, metadatas) for the top-k chunks for `question`."""
+    """Return (documents, metadatas) for the top chunks for `question`.
+
+    Pipeline (each stage is config-flagged): optional HyDE query expansion ->
+    hybrid dense+sparse retrieval of a wide candidate set -> optional
+    cross-encoder reranking down to k.
+    """
     k = k or config.TOP_K
-    q_emb = store.embed([question])[0]
-    res = store.query(q_emb, k)
+
+    search_text = _hyde_query(question) if config.HYDE else question
+    q_emb = store.embed_query(search_text)
+
+    # Pull a wider candidate set when reranking, so the reranker has choices.
+    n = max(k, config.RERANK_CANDIDATES) if config.RERANK else k
+    if config.HYBRID_SEARCH:
+        res = store.query_hybrid(search_text, q_emb, n)
+    else:
+        res = store.query(q_emb, n)
     docs = res.get("documents", [[]])[0]
     metas = res.get("metadatas", [[]])[0]
+
+    if config.RERANK:
+        docs, metas = _rerank(question, docs, metas, k)
+    else:
+        docs, metas = docs[:k], metas[:k]
+
+    _log_retrieval(question, metas)
     return docs, metas
+
+
+def _log_retrieval(question: str, metas: list) -> None:
+    """Append a one-line JSONL retrieval trace (free observability), if enabled."""
+    if not config.RETRIEVAL_LOG:
+        return
+    import json
+    from datetime import datetime
+
+    try:
+        config.RETRIEVAL_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        row = {
+            "ts": datetime.now().isoformat(timespec="seconds"),
+            "q": question,
+            "hits": [m.get("source") for m in metas],
+            "flags": {
+                "hybrid": config.HYBRID_SEARCH,
+                "rerank": config.RERANK,
+                "hyde": config.HYDE,
+            },
+        }
+        with config.RETRIEVAL_LOG_PATH.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(row) + "\n")
+    except OSError:
+        pass
+
+
+def _dedupe(docs, metas):
+    """Drop duplicate chunks (same source+heading) while preserving order."""
+    seen, d_out, m_out = set(), [], []
+    for d, m in zip(docs, metas):
+        key = (m.get("source"), m.get("heading"), d[:60])
+        if key in seen:
+            continue
+        seen.add(key)
+        d_out.append(d)
+        m_out.append(m)
+    return d_out, m_out
+
+
+def agentic_retrieve(question: str, k: int | None = None):
+    """Multi-hop retrieval: if the first pass looks thin, let the LLM propose a
+    follow-up search and merge the results.
+
+    Up to config.AGENTIC_MAX_STEPS extra hops. The LLM either replies DONE (the
+    context already answers the question) or emits a single refined search query.
+    Degrades to a single retrieve() if no LLM is reachable.
+    """
+    k = k or config.TOP_K
+    docs, metas = retrieve(question, k)
+    asked = {question}
+
+    for _ in range(max(0, config.AGENTIC_MAX_STEPS)):
+        context = _format_context(docs, metas) if docs else "(nothing retrieved yet)"
+        system = (
+            "You are a retrieval planner. Given the question and the notes "
+            "retrieved so far, decide if they are enough to answer well. Reply "
+            "with exactly 'DONE' if so. Otherwise reply with ONE short search "
+            "query (different from previous ones) that would find the missing "
+            "information. Output only 'DONE' or the query."
+        )
+        user = f"Question: {question}\n\nRetrieved so far:\n{context}"
+        try:
+            decision = llm.chat(system, user).strip()
+        except llm.LLMError:
+            break
+        if not decision or decision.upper().startswith("DONE"):
+            break
+        follow = decision.splitlines()[0].strip().strip('"')
+        if follow in asked:
+            break
+        asked.add(follow)
+        more_d, more_m = retrieve(follow, k)
+        docs, metas = _dedupe(docs + more_d, metas + more_m)
+
+    # Cap to a sensible context size (k * hops can grow).
+    limit = k * (config.AGENTIC_MAX_STEPS + 1)
+    return docs[:limit], metas[:limit]
 
 
 def build_chat_messages(question: str, mode: str = "notes", history=None):
@@ -73,7 +214,9 @@ def build_chat_messages(question: str, mode: str = "notes", history=None):
         system = _SYSTEM_GENERAL
         user_content = question
     else:
-        docs, metas = retrieve(question)
+        docs, metas = (
+            agentic_retrieve(question) if config.AGENTIC_RAG else retrieve(question)
+        )
         sources = [
             {
                 "source": m.get("source"),
@@ -120,7 +263,9 @@ def answer(question: str, mode: str = "notes") -> dict:
             text = f"[LLM unavailable] Set up Ollama or Groq to chat.\n\nDetails: {e}"
         return {"answer": text, "sources": [], "context_found": False, "mode": mode}
 
-    docs, metas = retrieve(question)
+    docs, metas = (
+        agentic_retrieve(question) if config.AGENTIC_RAG else retrieve(question)
+    )
 
     if not docs and mode == "notes":
         return {

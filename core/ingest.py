@@ -53,8 +53,16 @@ def _front_matter_title(text: str, fallback: str) -> str:
     return fallback
 
 
-def _split_paragraphs(text: str, max_chars: int) -> list[str]:
-    """Greedily pack paragraphs into pieces no longer than max_chars."""
+def _split_paragraphs(
+    text: str, max_chars: int, overlap: int | None = None
+) -> list[str]:
+    """Greedily pack paragraphs into pieces no longer than max_chars.
+
+    Consecutive pieces share a trailing/leading `overlap` characters so context
+    that straddles a chunk boundary is not lost at retrieval time (a standard
+    sliding-window technique). Overlap defaults to config.CHUNK_OVERLAP_CHARS.
+    """
+    overlap = config.CHUNK_OVERLAP_CHARS if overlap is None else overlap
     paras = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
     pieces, buf = [], ""
     for p in paras:
@@ -66,7 +74,16 @@ def _split_paragraphs(text: str, max_chars: int) -> list[str]:
             buf = p
     if buf:
         pieces.append(buf)
-    return pieces or [text.strip()]
+    pieces = pieces or [text.strip()]
+
+    if overlap <= 0 or len(pieces) < 2:
+        return pieces
+    # Prepend the tail of each piece to the next one (sliding-window overlap).
+    out = [pieces[0]]
+    for prev, cur in zip(pieces, pieces[1:]):
+        tail = prev[-overlap:].lstrip()
+        out.append(f"{tail}\n\n{cur}" if tail else cur)
+    return out
 
 
 def chunk_markdown(text: str, note_title: str, max_chars: int) -> list[tuple[str, str]]:
@@ -109,10 +126,15 @@ def build_index() -> dict:
     Pulls note content from the active backend (local files or the shared
     Supabase vault), so in Supabase mode each client rebuilds the same index
     from the same shared content. Returns a small stats dict.
+
+    When config.CONTEXTUAL_RETRIEVAL is on, each chunk is prefixed with a short
+    LLM-written line situating it within its note (Anthropic's "contextual
+    retrieval") before embedding — this is embedded, but the original chunk text
+    is what gets stored and shown, so citations stay clean.
     """
     store.reset_collection()
 
-    ids, texts, metadatas = [], [], []
+    ids, texts, embed_texts, metadatas = [], [], [], []
     # Only real content notes (hidden namespaces excluded server-side).
     notes = repo.get_repo().content_notes()
 
@@ -120,20 +142,80 @@ def build_index() -> dict:
         rel = rec.path
         raw = rec.content
         title = _front_matter_title(raw, fallback=Path(rel).stem)
-        for i, (heading, chunk_text) in enumerate(
-            chunk_markdown(raw, title, config.CHUNK_MAX_CHARS)
-        ):
+        chunks = chunk_markdown(raw, title, config.CHUNK_MAX_CHARS)
+        for i, (heading, chunk_text) in enumerate(chunks):
             ids.append(f"{rel}::{i}")
-            texts.append(chunk_text)
-            metadatas.append(
-                {"source": rel, "heading": heading, "note_title": title}
-            )
+            texts.append(chunk_text)  # stored & shown verbatim
+            metadatas.append({"source": rel, "heading": heading, "note_title": title})
+            if config.CONTEXTUAL_RETRIEVAL:
+                ctx = _contextualize(title, raw, chunk_text)
+                embed_texts.append(f"{ctx}\n\n{chunk_text}" if ctx else chunk_text)
+            else:
+                embed_texts.append(chunk_text)
 
     if texts:
-        embeddings = store.embed(texts)
+        embeddings = store.embed(embed_texts)
         store.add_chunks(ids, texts, metadatas, embeddings)
 
     return {"files": len(notes), "chunks": len(texts)}
+
+
+# --- Contextual retrieval (optional, cached) ----------------------------------
+
+_CONTEXT_CACHE_PATH = config.PROJECT_ROOT / ".cache" / "context.json"
+_context_cache: dict | None = None
+
+
+def _load_context_cache() -> dict:
+    global _context_cache
+    if _context_cache is None:
+        import json
+
+        try:
+            _context_cache = json.loads(_CONTEXT_CACHE_PATH.read_text("utf-8"))
+        except (OSError, ValueError):
+            _context_cache = {}
+    return _context_cache
+
+
+def _save_context_cache() -> None:
+    import json
+
+    _CONTEXT_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    _CONTEXT_CACHE_PATH.write_text(
+        json.dumps(_context_cache or {}), encoding="utf-8"
+    )
+
+
+def _contextualize(title: str, full_note: str, chunk: str) -> str:
+    """Return a one-line context for `chunk` within `full_note` (LLM, cached).
+
+    Cached by a hash of (note + chunk) so re-indexing unchanged notes is free
+    and never re-calls the LLM. Degrades to "" if no model is reachable.
+    """
+    import hashlib
+
+    from . import llm
+
+    key = hashlib.sha1(f"{full_note} {chunk}".encode("utf-8")).hexdigest()
+    cache = _load_context_cache()
+    if key in cache:
+        return cache[key]
+
+    body = _strip_frontmatter(full_note)[:3000]
+    system = (
+        "Give a single short sentence (max 20 words) that situates the following "
+        "excerpt within its document, to improve search retrieval. Output only the "
+        "sentence, no preamble."
+    )
+    user = f"Document '{title}':\n{body}\n\nExcerpt:\n{chunk[:800]}"
+    try:
+        ctx = llm.chat(system, user).strip().replace("\n", " ")
+    except llm.LLMError:
+        ctx = ""
+    cache[key] = ctx
+    _save_context_cache()
+    return ctx
 
 
 if __name__ == "__main__":

@@ -15,7 +15,9 @@ import base64
 import io
 from datetime import date, datetime
 
-from . import ingest, repo, tools
+from functools import lru_cache
+
+from . import config, ingest, repo, tools
 
 PHOTO_DIR = "photos/"
 _MAX_DIM = 1280       # longest side, px
@@ -111,3 +113,76 @@ def album_counts() -> dict:
 
 def delete_photo(path: str) -> None:
     repo.get_repo().delete(path)
+
+
+# --- Semantic photo search (CLIP) ---------------------------------------------
+# Search the gallery by description ("us at the beach") using a free CLIP model
+# that maps images and text into one space. Flag-gated (PHOTO_SEARCH) + lazy +
+# cached, so it never loads on the low-RAM cloud deploy unless turned on. When
+# off/unavailable it gracefully falls back to caption keyword matching.
+
+@lru_cache(maxsize=1)
+def _clip():
+    from sentence_transformers import SentenceTransformer
+
+    return SentenceTransformer(config.CLIP_MODEL)
+
+
+# path -> image embedding (kept across reruns within a process).
+_PHOTO_EMB: dict[str, list[float]] = {}
+
+
+def _caption_search(query: str, photos: list[dict], k: int) -> list[dict]:
+    terms = [t for t in query.lower().split() if t]
+    scored = []
+    for p in photos:
+        hay = f"{p['caption']} {p['album']} {p['by']}".lower()
+        score = sum(1 for t in terms if t in hay)
+        if score:
+            scored.append((score, p))
+    scored.sort(key=lambda s: s[0], reverse=True)
+    return [p for _, p in scored[:k]]
+
+
+def search_photos(query: str, k: int = 12) -> list[dict]:
+    """Find photos matching a text description. Returns the photo dicts + score.
+
+    Uses CLIP when PHOTO_SEARCH is enabled; otherwise (or if the model can't
+    load) falls back to matching the query against captions/albums.
+    """
+    photos = list_photos()
+    if not photos:
+        return []
+
+    if not config.PHOTO_SEARCH:
+        return _caption_search(query, photos, k)
+
+    try:
+        import numpy as np
+        from PIL import Image
+
+        model = _clip()
+        # Embed any photos we haven't seen yet (cached by path).
+        todo = [p for p in photos if p["path"] not in _PHOTO_EMB]
+        if todo:
+            imgs = [Image.open(io.BytesIO(p["data"])).convert("RGB") for p in todo]
+            vecs = model.encode(imgs, normalize_embeddings=True)
+            for p, v in zip(todo, vecs):
+                _PHOTO_EMB[p["path"]] = [float(x) for x in v]
+
+        q = np.asarray(model.encode([query], normalize_embeddings=True)[0], "float32")
+        ranked = sorted(
+            photos,
+            key=lambda p: float(np.asarray(_PHOTO_EMB[p["path"]], "float32") @ q),
+            reverse=True,
+        )
+        out = []
+        for p in ranked[:k]:
+            p = dict(p)
+            p["score"] = round(
+                float(np.asarray(_PHOTO_EMB[p["path"]], "float32") @ q), 4
+            )
+            out.append(p)
+        return out
+    except Exception:
+        return _caption_search(query, photos, k)

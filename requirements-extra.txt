@@ -1,0 +1,16 @@
+# Optional heavy extras — NOT installed on the low-RAM Streamlit Cloud deploy.
+# Install locally when you turn on the matching feature flag in .env:
+#
+#   pip install -r requirements-extra.txt
+#
+# Cross-encoder reranking (RERANK=1) and CLIP photo search (PHOTO_SEARCH=1) reuse
+# the already-installed `sentence-transformers`, so they need nothing here.
+
+# Voice input (speech-to-text) on the Ask page:
+streamlit-mic-recorder        # mic widget for Streamlit
+faster-whisper                # local, free Whisper transcription (no API key)
+
+# Optional: standardized RAG metrics for scripts/evaluate.py (the built-in
+# LLM-as-judge needs none of this — RAGAS is only if you want the academic suite).
+# ragas
+# datasets

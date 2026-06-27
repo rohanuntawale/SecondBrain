@@ -1,0 +1,33 @@
+name: Daily digest email
+
+# Runs every morning and emails a summary of notes touched that day.
+# Configure these repo secrets: GROQ_API_KEY, SUPABASE_URL, SUPABASE_KEY,
+# SMTP_HOST, SMTP_USER, SMTP_PASS, DIGEST_TO (and optionally SMTP_PORT/DIGEST_FROM).
+on:
+  schedule:
+    - cron: "30 2 * * *"   # 02:30 UTC ≈ 08:00 IST
+  workflow_dispatch: {}     # allow manual runs from the Actions tab
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+      - name: Send digest
+        env:
+          LLM_PROVIDER: groq
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          STORAGE_BACKEND: supabase
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          DIGEST_FROM: ${{ secrets.DIGEST_FROM }}
+          DIGEST_TO: ${{ secrets.DIGEST_TO }}
+        run: python scripts/email_digest.py

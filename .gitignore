@@ -11,6 +11,10 @@ venv/
 # Vector store (rebuilt from notes/ via scripts/reindex.py)
 .chroma/
 
+# Generated at runtime
+.cache/          # contextual-retrieval LLM cache
+logs/            # retrieval JSONL logs
+
 # OS / editor
 .DS_Store
 .vscode/

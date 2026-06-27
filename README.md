@@ -51,6 +51,56 @@ scripts/     reindex.py, evaluate.py
 docs/        project context, report outline, deploy guide
 ```
 
+## Advanced features (all free)
+
+Beyond basic RAG, SecondBrain now includes:
+
+- **Hybrid search** — fuses dense embeddings with BM25 keyword scoring so exact
+  terms (names, dates) aren't missed. On by default (`HYBRID_SEARCH=1`).
+- **Cross-encoder reranking** — retrieve wide, then re-score the top with a small
+  cross-encoder for sharper citations (`RERANK=1`).
+- **HyDE query expansion** — embeds a hypothetical answer for better recall
+  (`HYDE=1`).
+- **Contextual retrieval** — Anthropic's technique; an LLM-written context line
+  is prepended to each chunk before embedding, cached by hash
+  (`CONTEXTUAL_RETRIEVAL=1`).
+- **Agentic multi-hop RAG** — the model issues follow-up searches when the first
+  pass is thin (`AGENTIC_RAG=1`).
+- **Overlapping chunking** + **embedding/answer caching** for quality and speed.
+- **Knowledge graph** (🕸️ Graph page) — interactive `[[wiki-link]]` graph with
+  hub/orphan analysis (networkx + pyvis).
+- **More tools** — `summarize_note`, `extract_action_items`,
+  `find_duplicate_notes`, `merge_notes`, `web_search` (DuckDuckGo, no key), plus
+  AI auto-tagging + TL;DR on note creation. All exposed over MCP.
+- **Semantic photo search** — find pictures by description via CLIP
+  (`PHOTO_SEARCH=1`); falls back to caption search.
+- **Voice I/O** — speak answers (browser TTS) + mic dictation (local Whisper).
+- **Evaluation harness** — `python scripts/evaluate.py --judge` scores
+  faithfulness / relevance / context-precision with a free LLM-as-judge.
+- **Persistent vectors (optional)** — Supabase pgvector backend
+  (`VECTOR_BACKEND=pgvector`, see `docs/PGVECTOR_SETUP.md`).
+- **Observability + CI** — JSONL retrieval logging (`RETRIEVAL_LOG=1`), a pytest
+  suite, GitHub Actions CI, and a scheduled daily-digest email workflow.
+
+### 🧪 Beta features (`core/beta.py`, the **🧪 Beta** page)
+
+Experimental but fully working; all degrade gracefully with no LLM. Default on
+(`BETA_FEATURES=1`), also exposed over MCP.
+
+- **💞 For the two of you** — **time capsules** (seal a message until a future
+  date), a **gratitude jar**, **mood correlation** (do your moods move
+  together?), a **"how well do you know me" quiz** generated from a partner's
+  diary, an AI **year-in-review**, and AI **journaling prompts** (🪄 on Diary).
+- **🧠 Smarter brain** — a **weekly retrospective** over recent notes/diary,
+  **stale-note resurfacing** (spaced-repetition nudges), **unified search**
+  across notes *and* photos in one query, and **calendar (`.ics`) export** of
+  important dates and a note's action items into real reminders.
+
+Heavy models (reranker, CLIP, Whisper) are lazy-loaded and **default off** so the
+low-RAM Streamlit Cloud deploy keeps working; enable them locally via `.env` and
+`pip install -r requirements-extra.txt`. All knobs are documented in
+`.env.example`.
+
 ## Status
 
 - [x] Scaffold, sample notes, config

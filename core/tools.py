@@ -68,18 +68,40 @@ def list_notes() -> list[str]:
 # --- Write tools (validated, then re-index) -----------------------------------
 
 def create_note(
-    title: str, body: str, tags: list[str] | None = None, author: str = ""
+    title: str,
+    body: str,
+    tags: list[str] | None = None,
+    author: str = "",
+    auto: bool = False,
 ) -> str:
     """Create a new .md note with YAML front-matter, then re-index. Returns path.
 
     `author` (optional) attributes the note to a person so it can be filtered
     later; leave empty for a shared/unattributed note.
+
+    `auto` (optional) enriches the note with the LLM at creation time: it fills
+    in tags when none are given and prepends a one-line **TL;DR** to the body.
+    Degrades silently to a plain note if no model is reachable.
     """
     tags = tags or []
     rel = f"{_slugify(title)}.md"
     r = repo.get_repo()
     if r.exists(rel):
         raise ValueError(f"Note already exists: {rel}")
+
+    if auto:
+        if not tags:
+            try:
+                tags = _suggest_tags_for_text(f"{title}\n\n{body}")
+            except llm.LLMError:
+                tags = []
+        try:
+            tldr = summarize_one(f"{title}\n\n{body}", sentences=1)
+            if tldr:
+                body = f"> **TL;DR:** {tldr}\n\n{body}"
+        except llm.LLMError:
+            pass
+
     tag_line = "[" + ", ".join(tags) + "]"
     author_line = f"author: {author}\n" if author.strip() else ""
     content = (
@@ -89,6 +111,15 @@ def create_note(
     saved = r.save(rel, content)
     ingest.build_index()
     return saved
+
+
+def summarize_one(text: str, sentences: int = 3) -> str:
+    """Summarize raw text in N sentences (LLM). Shared by create_note/summarize."""
+    system = (
+        f"Summarize the following in {max(1, sentences)} sentence(s). Be faithful; "
+        "do not invent. Output only the summary."
+    )
+    return llm.chat(system, text[:4000]).strip()
 
 
 def import_file(filename: str, data: bytes) -> str:
@@ -155,9 +186,8 @@ def append_to_note(path: str, text: str) -> str:
     return saved
 
 
-def suggest_tags(path: str) -> list[str]:
-    """Ask the LLM to propose tags drawn from the existing tag vocabulary."""
-    text = read_note(path)
+def _suggest_tags_for_text(text: str) -> list[str]:
+    """Core tag suggester over raw note text (shared by suggest_tags + create)."""
     vocab = sorted(_collect_tag_vocabulary())
     system = (
         "You suggest 3-6 short lowercase tags for a note. Prefer reusing tags from "
@@ -168,6 +198,11 @@ def suggest_tags(path: str) -> list[str]:
     tags = [t.strip().lower() for t in re.split(r"[,\n]", raw) if t.strip()]
     # keep them tidy: short, no spaces
     return [re.sub(r"\s+", "-", t) for t in tags if len(t) <= 30][:6]
+
+
+def suggest_tags(path: str) -> list[str]:
+    """Ask the LLM to propose tags drawn from the existing tag vocabulary."""
+    return _suggest_tags_for_text(read_note(path))
 
 
 def add_link(from_path: str, to_title: str) -> str:
@@ -317,6 +352,123 @@ def daily_digest(on: str | None = None) -> dict:
     for n in touched:
         n.pop("_body", None)  # internal field, not part of the public result
     return {"date": target.isoformat(), "notes": touched, "summary": summary}
+
+
+# --- Knowledge tools: summarize, action items, dedupe, web search -------------
+
+def summarize_note(path: str, sentences: int = 3) -> str:
+    """Return a short LLM summary (TL;DR) of a note."""
+    body = ingest._strip_frontmatter(read_note(path)).strip()
+    try:
+        return summarize_one(body, sentences=sentences)
+    except llm.LLMError as e:
+        return f"[LLM unavailable] Could not summarize. Details: {e}"
+
+
+def extract_action_items(path: str) -> list[str]:
+    """Pull actionable to-dos out of a note (LLM). Returns a list of strings."""
+    text = read_note(path)
+    body = ingest._strip_frontmatter(text).strip()
+    system = (
+        "Extract concrete action items / tasks from the note. Return ONE per line, "
+        "each starting with '- '. If there are none, return the single line "
+        "'(none)'. Do not invent tasks that are not implied by the text."
+    )
+    try:
+        raw = llm.chat(system, body[:4000])
+    except llm.LLMError:
+        return []
+    items = [
+        re.sub(r"^[-*\d.\s]+", "", ln).strip()
+        for ln in raw.splitlines()
+        if ln.strip()
+    ]
+    items = [i for i in items if i and i.lower() != "(none)"]
+    return items
+
+
+def find_duplicate_notes(threshold: float = 0.8) -> list[dict]:
+    """Find pairs of notes that are near-duplicates by embedding similarity.
+
+    Embeds each note's body once, then reports pairs whose cosine similarity is
+    >= `threshold`. Returns [{a, b, score}] sorted by score (highest first).
+    """
+    import numpy as np
+
+    recs = _content_notes()
+    if len(recs) < 2:
+        return []
+    bodies = [ingest._strip_frontmatter(r.content).strip()[:4000] for r in recs]
+    embs = np.asarray(store.embed(bodies), dtype="float32")
+    sims = embs @ embs.T  # unit-normalized -> cosine
+    pairs: list[dict] = []
+    for i in range(len(recs)):
+        for j in range(i + 1, len(recs)):
+            score = float(sims[i, j])
+            if score >= threshold:
+                pairs.append(
+                    {"a": recs[i].path, "b": recs[j].path, "score": round(score, 4)}
+                )
+    return sorted(pairs, key=lambda p: p["score"], reverse=True)
+
+
+def merge_notes(primary: str, secondary: str, delete_secondary: bool = False) -> str:
+    """Append `secondary`'s body under the `primary` note (manual de-dup helper).
+
+    Adds a divider and the secondary note's content to the primary note. If
+    `delete_secondary` is True, removes the secondary note afterward. Re-indexes.
+    """
+    r = repo.get_repo()
+    prim, sec = r.get(primary), r.get(secondary)
+    if prim is None:
+        raise ValueError(f"Note not found: {primary}")
+    if sec is None:
+        raise ValueError(f"Note not found: {secondary}")
+    sec_title = ingest._front_matter_title(sec.content, fallback=Path(secondary).stem)
+    sec_body = ingest._strip_frontmatter(sec.content).strip()
+    sep = "" if prim.content.endswith("\n") else "\n"
+    merged = f"{prim.content}{sep}\n---\n\n## Merged from {sec_title}\n\n{sec_body}\n"
+    r.save(primary, merged)
+    if delete_secondary:
+        r.delete(secondary)
+    ingest.build_index()
+    action = "merged + deleted" if delete_secondary else "merged"
+    return f"{action}: {secondary} -> {primary}"
+
+
+def web_search(query: str, k: int = 5) -> list[dict]:
+    """Free web search (no API key) via DuckDuckGo's HTML endpoint.
+
+    Best-effort: returns up to `k` {title, url, snippet}. Returns [] on any
+    network/parse error so callers never crash. Use to ground answers in fresh
+    info the notes don't contain.
+    """
+    import html as _html
+    import urllib.parse
+    import urllib.request
+
+    url = "https://html.duckduckgo.com/html/?q=" + urllib.parse.quote(query)
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            page = resp.read().decode("utf-8", errors="replace")
+    except Exception:
+        return []
+
+    out: list[dict] = []
+    for m in re.finditer(
+        r'<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', page, re.DOTALL
+    ):
+        href, title = m.group(1), re.sub(r"<[^>]+>", "", m.group(2))
+        # DuckDuckGo wraps the real URL in a redirect; pull out uddg=.
+        q = urllib.parse.urlparse(href).query
+        real = urllib.parse.parse_qs(q).get("uddg", [href])[0]
+        out.append(
+            {"title": _html.unescape(title).strip(), "url": real, "snippet": ""}
+        )
+        if len(out) >= k:
+            break
+    return out
 
 
 # --- Diary (dated personal entries, shared by multiple authors) ---------------

@@ -8,6 +8,7 @@ Run locally:
 
 from __future__ import annotations
 
+import json
 import os
 import random
 from datetime import date
@@ -30,7 +31,9 @@ except Exception:
 
 import pandas as pd  # noqa: E402
 
-from core import config, couple, ingest, llm, photos, rag, repo, store, tools  # noqa: E402
+from core import (  # noqa: E402
+    beta, config, couple, ingest, llm, photos, rag, repo, store, tools,
+)
 
 st.set_page_config(page_title="SecondBrain", page_icon="🧠", layout="wide")
 
@@ -77,6 +80,51 @@ def hearts_html(n: int = 16) -> str:
             f'animation-delay:{delay}s;animation-duration:{dur}s;">{emo}</span>'
         )
     return "".join(spans)
+
+
+def speak(text: str) -> None:
+    """Speak `text` in the browser via the free Web Speech API (no API key)."""
+    if not text:
+        return
+    payload = json.dumps(text[:1200])  # keep utterance reasonable
+    st.components.v1.html(
+        f"""
+        <script>
+        const u = new SpeechSynthesisUtterance({payload});
+        u.rate = 1.0; u.pitch = 1.0;
+        window.speechSynthesis.cancel();
+        window.speechSynthesis.speak(u);
+        </script>
+        """,
+        height=0,
+    )
+
+
+@st.cache_resource
+def _whisper_model():
+    """Load faster-whisper once (cached). Raises if the extra isn't installed."""
+    from faster_whisper import WhisperModel
+
+    return WhisperModel("base", compute_type="int8")
+
+
+def transcribe(audio_bytes: bytes) -> str:
+    """Transcribe mic audio with local faster-whisper (free, no API key).
+
+    Returns "" if the optional dependency isn't installed (see
+    requirements-extra.txt) or transcription fails.
+    """
+    import tempfile
+
+    try:
+        model = _whisper_model()
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tf:
+            tf.write(audio_bytes)
+            path = tf.name
+        segments, _ = model.transcribe(path)
+        return " ".join(s.text for s in segments).strip()
+    except Exception:
+        return ""
 
 
 @st.fragment(run_every=15)
@@ -475,6 +523,20 @@ with st.sidebar:
     if config.LLM_PROVIDER == "groq" and not config.GROQ_API_KEY:
         st.warning("No GROQ_API_KEY set — retrieval works, but answers need a key.")
 
+    # Advanced-retrieval status: shows which free upgrades are active so you can
+    # see at a glance how answers are being produced.
+    with st.expander("⚙️ Retrieval engine"):
+        def _onoff(b):
+            return "🟢 on" if b else "⚪ off"
+
+        st.caption(f"Hybrid (BM25+vector): {_onoff(config.HYBRID_SEARCH)}")
+        st.caption(f"Reranking (cross-encoder): {_onoff(config.RERANK)}")
+        st.caption(f"HyDE query expansion: {_onoff(config.HYDE)}")
+        st.caption(f"Contextual retrieval: {_onoff(config.CONTEXTUAL_RETRIEVAL)}")
+        st.caption(f"Agentic multi-hop: {_onoff(config.AGENTIC_RAG)}")
+        st.caption(f"Vector store: `{config.VECTOR_BACKEND}`")
+        st.caption("Toggle these via flags in `.env` (see `.env.example`).")
+
     # Live sync: auto-pull partner's changes every 15s (shared mode only).
     if config.STORAGE_BACKEND == "supabase":
         st.caption("🟢 Live sync on")
@@ -484,8 +546,10 @@ with st.sidebar:
 # --- Tabs ---------------------------------------------------------------------
 PAGES = [
     "💬 Ask", "💞 Us", "📸 Photos", "📔 Diary", "💡 Insights", "📚 Notes",
-    "✍️ Create", "📰 Digest", "⬆️ Upload",
+    "🕸️ Graph", "✍️ Create", "📰 Digest", "⬆️ Upload",
 ]
+if config.BETA_FEATURES:
+    PAGES.append("🧪 Beta")
 # Allow in-app buttons (e.g. the album cards on the Us page) to switch pages:
 # they set _goto, which we apply to the nav before the widget is created.
 _goto = st.session_state.pop("_goto", None)
@@ -522,6 +586,29 @@ if page == "💬 Ask":
             st.session_state.chat = []
             st.rerun()
 
+    # Voice: 🔊 speak answers (browser TTS, always available) + 🎙️ mic input
+    # (optional faster-whisper, see requirements-extra.txt).
+    voice_prompt = None
+    vc1, vc2 = st.columns([1, 3])
+    with vc1:
+        speak_answers = st.toggle("🔊 Speak answers", value=False, key="tts_on")
+    with vc2:
+        try:
+            from streamlit_mic_recorder import mic_recorder
+
+            audio = mic_recorder(
+                start_prompt="🎙️ Speak", stop_prompt="⏹️ Stop", key="mic"
+            )
+            if audio and audio.get("bytes"):
+                with st.spinner("Transcribing…"):
+                    text = transcribe(audio["bytes"])
+                if text:
+                    voice_prompt = text
+                else:
+                    st.caption("Couldn't transcribe — install `faster-whisper`.")
+        except Exception:
+            st.caption("🎙️ Mic input: `pip install -r requirements-extra.txt`")
+
     if "chat" not in st.session_state:
         st.session_state.chat = []
 
@@ -540,7 +627,7 @@ if page == "💬 Ask":
             if m.get("sources"):
                 _render_sources(m["sources"])
 
-    prompt = st.chat_input("Ask your notes, or just chat…")
+    prompt = st.chat_input("Ask your notes, or just chat…") or voice_prompt
     if prompt and prompt.strip():
         st.session_state.chat.append({"role": "user", "content": prompt})
         with st.chat_message("user", avatar="🧑"):
@@ -562,6 +649,8 @@ if page == "💬 Ask":
             full = st.write_stream(_safe_stream())
             if sources:
                 _render_sources(sources)
+            if st.session_state.get("tts_on") and full:
+                speak(full)
         st.session_state.chat.append(
             {"role": "assistant", "content": full, "sources": sources}
         )
@@ -863,6 +952,30 @@ elif page == "📸 Photos":
             st.rerun()
 
     st.markdown("---")
+
+    # Semantic search across the gallery (CLIP when PHOTO_SEARCH=1, else captions).
+    sq = st.text_input(
+        "🔎 Search photos by description",
+        key="photo_search",
+        placeholder="us at sunset / birthday cake / by the sea…",
+    )
+    if sq.strip():
+        results = photos.search_photos(sq, k=9)
+        mode = "by meaning (CLIP)" if config.PHOTO_SEARCH else "by caption"
+        st.caption(f"{len(results)} match(es) {mode}")
+        if results:
+            scols = st.columns(3)
+            for i, ph in enumerate(results):
+                with scols[i % 3]:
+                    st.image(ph["data"], use_container_width=True)
+                    st.markdown(
+                        f"{author_chip(ph['by'])} &nbsp; *{ph['caption'] or '—'}*",
+                        unsafe_allow_html=True,
+                    )
+        elif not config.PHOTO_SEARCH:
+            st.caption("Tip: set `PHOTO_SEARCH=1` in .env for true visual search.")
+        st.markdown("---")
+
     counts = photos.album_counts()
 
     def _view_label(a):
@@ -902,6 +1015,17 @@ elif page == "📔 Diary":
     st.subheader("📔 Shared diary")
     st.caption("Write dated entries. Each one becomes a note — searchable in Ask "
                "and summarized in the Digest.")
+
+    # 🧪 Beta: a personalized journaling prompt to break blank-page paralysis.
+    if config.BETA_FEATURES:
+        pcol1, pcol2 = st.columns([1, 3])
+        with pcol1:
+            if st.button("🪄 Prompt me", help="AI suggests something to write about"):
+                with st.spinner("Thinking of a prompt…"):
+                    st.session_state["_journal_prompt"] = beta.journal_prompt()
+        with pcol2:
+            if st.session_state.get("_journal_prompt"):
+                st.info(f"✍️ {st.session_state['_journal_prompt']}")
 
     with st.form("diary_form", clear_on_submit=True):
         c1, c2 = st.columns([2, 1])
@@ -1038,8 +1162,72 @@ elif page == "📚 Notes":
                     st.success(tools.auto_link(chosen))
                 except Exception as e:
                     st.error(str(e))
+
+        # Second row of AI actions on the selected note.
+        b1, b2, b3 = st.columns(3)
+        with b1:
+            if st.button("📝 Summarize"):
+                with st.spinner("Summarizing…"):
+                    st.info(tools.summarize_note(chosen))
+        with b2:
+            if st.button("✅ Action items"):
+                with st.spinner("Extracting…"):
+                    items = tools.extract_action_items(chosen)
+                if items:
+                    for it in items:
+                        st.markdown(f"- [ ] {it}")
+                else:
+                    st.caption("No action items found.")
+        with b3:
+            if st.button("🧬 Find duplicates"):
+                with st.spinner("Comparing notes…"):
+                    dups = tools.find_duplicate_notes(threshold=0.8)
+                if dups:
+                    for d in dups:
+                        st.markdown(
+                            f"- `{d['a']}` ↔ `{d['b']}` — {d['score']:.0%} similar"
+                        )
+                    st.caption("Merge near-duplicates via the MCP `merge_notes` tool.")
+                else:
+                    st.caption("No near-duplicate notes 🎉")
+
         st.markdown("---")
         st.code(tools.read_note(chosen), language="markdown")
+
+# Graph -----------------------------------------------------------------------
+elif page == "🕸️ Graph":
+    st.subheader("🕸️ Knowledge graph")
+    st.caption(
+        "Your notes linked by `[[wiki-links]]`. Bigger gold nodes are hubs; grey "
+        "nodes are orphans (nothing links to them). Drag to explore."
+    )
+    from core import graph as kgraph
+
+    stats = kgraph.graph_stats()
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Notes", stats["nodes"])
+    m2.metric("Links", stats["edges"])
+    m3.metric("Orphans", len(stats["orphans"]))
+
+    if stats["nodes"] == 0:
+        st.info("No notes to graph yet. Create some and add [[wiki-links]].")
+    else:
+        try:
+            html = kgraph.to_pyvis_html(height="600px")
+            st.components.v1.html(html, height=640, scrolling=False)
+        except Exception as e:
+            st.error(f"Could not render the graph: {e}")
+
+        if stats["hubs"]:
+            st.markdown("##### 🔗 Most-connected notes")
+            for h in stats["hubs"]:
+                st.markdown(f"- **{h['title']}** — {h['degree']} link(s)")
+        if stats["orphans"]:
+            with st.expander(f"🪂 Orphan notes ({len(stats['orphans'])})"):
+                for o in stats["orphans"]:
+                    st.markdown(f"- {o}")
+            st.caption("Tip: open a note on 📚 Notes and use **Auto-link related**.")
+
 
 # Create ----------------------------------------------------------------------
 elif page == "✍️ Create":
@@ -1051,6 +1239,11 @@ elif page == "✍️ Create":
     with c2:
         tags_raw = st.text_input("Tags (comma-separated)", "")
     body = st.text_area("Body", height=200)
+    auto = st.checkbox(
+        "✨ AI enrich on save",
+        value=False,
+        help="Auto-fill tags (if you leave them blank) and prepend a one-line TL;DR.",
+    )
     if st.button("Create note", type="primary"):
         if not title.strip():
             st.error("Title is required.")
@@ -1058,7 +1251,10 @@ elif page == "✍️ Create":
             tags = [t.strip() for t in tags_raw.split(",") if t.strip()]
             author = "" if c_author == "Shared" else c_author
             try:
-                path = tools.create_note(title, body, tags, author=author)
+                with st.spinner("Saving…" + (" enriching with AI…" if auto else "")):
+                    path = tools.create_note(
+                        title, body, tags, author=author, auto=auto
+                    )
                 st.success(f"Created `{path}` and re-indexed.")
                 st.balloons()
             except Exception as e:
@@ -1108,3 +1304,292 @@ elif page == "⬆️ Upload":
                 f"Imported {len(saved)} file(s); indexed {stats['chunks']} chunks."
             )
             st.balloons()
+
+# Beta (experimental but functional extras) -----------------------------------
+elif page == "🧪 Beta":
+    st.subheader("🧪 Beta features")
+    st.caption(
+        "New, experimental — but fully working. These build on your notes, "
+        "diary, photos and couple data. Turn the whole page off with "
+        "`BETA_FEATURES=0` in `.env`."
+    )
+
+    fam = st.radio(
+        "Family",
+        ["💞 For the two of you", "🧠 Smarter brain"],
+        horizontal=True,
+        key="beta_family",
+    )
+
+    # =====================================================================
+    if fam == "💞 For the two of you":
+
+        # --- Time capsule ---
+        st.markdown("### 💌 Time capsule")
+        st.caption("Seal a message that only opens on a future date.")
+        with st.expander("✍️ Seal a new capsule", expanded=False):
+            tc1, tc2 = st.columns(2)
+            with tc1:
+                cap_from = st.radio("From", USERS, horizontal=True, key="cap_from")
+            cap_to = next(u for u in USERS if u != cap_from)
+            with tc2:
+                cap_unlock = st.date_input(
+                    "Opens on", value=date.today(), min_value=date.today(),
+                    key="cap_unlock",
+                )
+            cap_msg = st.text_area(
+                f"Message for {cap_to}", key="cap_msg",
+                placeholder="Dear future us…", height=110,
+            )
+            if st.button("🔒 Seal it", type="primary"):
+                try:
+                    beta.add_time_capsule(
+                        cap_from, cap_to, cap_msg, cap_unlock.isoformat()
+                    )
+                    st.success(
+                        f"Sealed 💌 — opens for {cap_to} on {cap_unlock.isoformat()}."
+                    )
+                    st.balloons()
+                except Exception as e:
+                    st.error(str(e))
+
+        cap_who = st.selectbox("Capsules for", USERS, key="cap_inbox_who")
+        caps = beta.list_time_capsules(cap_who)
+        if not caps:
+            st.caption(f"No capsules for {cap_who} yet — seal the first one above. 💌")
+        for c in caps:
+            if c["unlocked"]:
+                st.markdown(
+                    f'<div class="sb-card" style="border-left-color:{author_color(c["from"])};">'
+                    f'<div class="meta">💌 From {c["from"]} · sealed {c["created"]} · '
+                    f'opened {c["unlock"]}</div>'
+                    f'<div class="body" style="font-style:italic;">“{c["message"]}”</div>'
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.markdown(
+                    f'<div class="sb-card" style="border-left-color:{SHARED_COLOR};opacity:.8;">'
+                    f'<div class="meta">🔒 Sealed from {c["from"]}</div>'
+                    f'<div class="body">Opens on <b>{c["unlock"]}</b> '
+                    f'— {c["days_left"]} day(s) to go.</div></div>',
+                    unsafe_allow_html=True,
+                )
+
+        st.markdown("---")
+
+        # --- Gratitude jar ---
+        st.markdown("### 🫙 Gratitude jar")
+        st.caption("Drop in the little things you're thankful for.")
+        gc1, gc2 = st.columns([1, 3])
+        with gc1:
+            grat_by = st.radio("By", USERS, horizontal=True, key="grat_by")
+        with gc2:
+            grat_text = st.text_input(
+                "I'm grateful for…", key="grat_text",
+                placeholder="that you made me coffee this morning",
+            )
+        if st.button("💛 Add to jar"):
+            try:
+                beta.add_gratitude(grat_by, grat_text)
+                st.success("Added 💛")
+                st.rerun()
+            except Exception as e:
+                st.error(str(e))
+        grats = beta.list_gratitude(limit=12)
+        if grats:
+            for g in grats:
+                st.markdown(
+                    f"{author_chip(g['by'])} &nbsp; *{g['date']}* — {g['text']}",
+                    unsafe_allow_html=True,
+                )
+        else:
+            st.caption("Your jar is empty — add the first thing above. 💛")
+
+        st.markdown("---")
+
+        # --- Mood correlation ---
+        st.markdown("### 📊 Mood correlation")
+        st.caption("Do your moods move together? (Uses moods from diary entries.)")
+        if st.button("🔍 Analyze our moods"):
+            mc = beta.mood_correlation()
+            st.markdown(
+                f'<div class="sb-card"><div class="body">{mc["summary"]}</div></div>',
+                unsafe_allow_html=True,
+            )
+            if mc["by_author"]:
+                cols = st.columns(len(mc["by_author"]))
+                for col, (a, avg) in zip(cols, mc["by_author"].items()):
+                    col.metric(f"{a}'s avg mood", f"{avg} / 5")
+            if mc["by_weekday"]:
+                wd = pd.DataFrame(
+                    {"avg mood": mc["by_weekday"]}
+                ).reindex(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]).dropna()
+                st.bar_chart(wd)
+            if mc["correlation"] is not None:
+                st.caption(
+                    f"Correlation r = {mc['correlation']} over {mc['n_shared']} "
+                    "shared day(s)."
+                )
+
+        st.markdown("---")
+
+        # --- Partner quiz ---
+        st.markdown("### ❓ How well do you know me?")
+        st.caption("A quiz generated from one partner's diary — the other guesses.")
+        about = st.radio("Quiz about", USERS, horizontal=True, key="quiz_about")
+        if st.button("🎯 Generate quiz", type="primary"):
+            with st.spinner("Reading the diary…"):
+                st.session_state["_quiz"] = beta.partner_quiz(about, n=5)
+        quiz = st.session_state.get("_quiz")
+        if quiz is not None:
+            if not quiz:
+                st.info(
+                    f"Not enough of {about}'s diary yet (or no LLM configured). "
+                    "Write a few entries and try again. 💞"
+                )
+            else:
+                for i, q in enumerate(quiz, 1):
+                    st.markdown(f"**Q{i}. {q['question']}**")
+                    with st.expander("Reveal answer"):
+                        st.write(q["answer"])
+
+        st.markdown("---")
+
+        # --- Year in review ---
+        st.markdown("### 🎞️ Year in review")
+        yr = st.number_input(
+            "Year", min_value=2000, max_value=date.today().year,
+            value=date.today().year, step=1, key="yir_year",
+        )
+        if st.button("✨ Compile our year"):
+            with st.spinner("Looking back…"):
+                yir = beta.year_in_review(int(yr))
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Diary entries", yir["entry_count"])
+            m2.metric("Photos", yir["photo_count"])
+            m3.metric("Authors", len(yir["authors"]))
+            if yir["top_moods"]:
+                st.caption(
+                    "Top moods: "
+                    + " · ".join(f"{m} ×{n}" for m, n in yir["top_moods"])
+                )
+            st.markdown(
+                f'<div class="sb-card"><div class="body">{yir["highlights"]}</div></div>',
+                unsafe_allow_html=True,
+            )
+
+    # =====================================================================
+    else:  # 🧠 Smarter brain
+
+        # --- Weekly retrospective ---
+        st.markdown("### 🗓️ Weekly retrospective")
+        st.caption("An AI reflection over everything you wrote recently.")
+        days = st.slider("Look back (days)", 3, 30, 7, key="retro_days")
+        if st.button("🪞 Reflect", type="primary"):
+            with st.spinner("Reflecting on your week…"):
+                retro = beta.weekly_retrospective(days)
+            st.markdown(
+                f"**{retro['since']} → {retro['until']}** · "
+                f"{len(retro['items'])} note(s) touched"
+            )
+            st.markdown(
+                f'<div class="sb-card"><div class="body">{retro["reflection"]}</div></div>',
+                unsafe_allow_html=True,
+            )
+            if retro["items"]:
+                with st.expander("Notes in this window"):
+                    for n in retro["items"]:
+                        st.markdown(f"- **{n['title']}** (`{n['path']}`, {n['when']})")
+
+        st.markdown("---")
+
+        # --- Resurface ---
+        st.markdown("### ♻️ Resurface a memory")
+        st.caption(
+            "Surfaces a relevant note you haven't touched in a while — "
+            "spaced-repetition for your brain."
+        )
+        rs1, rs2 = st.columns([3, 1])
+        with rs1:
+            seed = st.text_input(
+                "About (optional)", key="resurface_seed",
+                placeholder="leave blank to use your most recent note",
+            )
+        with rs2:
+            rs_days = st.number_input(
+                "Older than (days)", min_value=1, max_value=365, value=14,
+                key="resurface_days",
+            )
+        if st.button("♻️ Resurface"):
+            hits = beta.resurface(seed, days=int(rs_days), k=3)
+            if not hits:
+                st.info("Nothing to resurface yet — write more notes over time. 💫")
+            for h in hits:
+                st.markdown(
+                    f'<div class="sb-card"><div class="meta">{h["title"]} · '
+                    f'{h["age_days"]}d old · match {h["score"]}</div>'
+                    f'<div class="body">{h["preview"]}<br>'
+                    f'<code>{h["path"]}</code></div></div>',
+                    unsafe_allow_html=True,
+                )
+
+        st.markdown("---")
+
+        # --- Unified search (notes + photos) ---
+        st.markdown("### 🔭 Unified search")
+        st.caption("One query, across both your notes and your photo gallery.")
+        uq = st.text_input(
+            "Search everything", key="unified_q",
+            placeholder="our trip to the sea…",
+        )
+        if uq.strip():
+            res = beta.unified_search(uq, k=6)
+            ncol, pcol = st.columns(2)
+            with ncol:
+                st.markdown("##### 📝 Notes")
+                if res["notes"]:
+                    for n in res["notes"]:
+                        st.markdown(
+                            f"- **{n.get('note_title', '?')}** "
+                            f"(`{n.get('source')}`, {n.get('score')})"
+                        )
+                else:
+                    st.caption("No matching notes.")
+            with pcol:
+                st.markdown("##### 📸 Photos")
+                if res["photos"]:
+                    for ph in res["photos"][:6]:
+                        st.image(ph["data"], use_container_width=True,
+                                 caption=(ph.get("caption") or ph.get("by", "")))
+                else:
+                    st.caption("No matching photos.")
+
+        st.markdown("---")
+
+        # --- Calendar export (.ics) ---
+        st.markdown("### 📆 Calendar export")
+        st.caption(
+            "Turn your important dates and a note's action items into real "
+            "calendar/reminder files you can import."
+        )
+        st.download_button(
+            "📅 Download important dates (.ics)",
+            data=beta.dates_to_ics(),
+            file_name="secondbrain-dates.ics",
+            mime="text/calendar",
+            help="Yearly-recurring anniversaries/birthdays with a 2-day reminder.",
+        )
+        note_paths = tools.list_notes()
+        if note_paths:
+            tgt = st.selectbox("Note → reminders", note_paths, key="ics_note")
+            if st.button("🔧 Build reminders (.ics)"):
+                with st.spinner("Extracting action items…"):
+                    st.session_state["_ics"] = beta.action_items_to_ics(tgt)
+            if st.session_state.get("_ics"):
+                st.download_button(
+                    "✅ Download reminders (.ics)",
+                    data=st.session_state["_ics"],
+                    file_name="secondbrain-reminders.ics",
+                    mime="text/calendar",
+                )
