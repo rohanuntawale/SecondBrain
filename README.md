@@ -1,5 +1,7 @@
 # SecondBrain — RAG + MCP Smart Notes Assistant
 
+**🌐 Live app: https://secondbrain-wfpq.onrender.com**
+
 A personal knowledge assistant that **reads** your Markdown notes (RAG with
 citations) and **acts** on them (create notes, suggest tags, add `[[wiki-links]]`,
 find orphans). One shared `core/` brain is exposed two ways: a **Streamlit web
