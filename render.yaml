@@ -1,0 +1,31 @@
+# Render Blueprint — deploys SecondBrain as a persistent Streamlit web service.
+# Streamlit is a long-running WebSocket server (this is why it can't run on
+# Vercel's serverless functions). Render's "web service" runs it as a real
+# process, binding to Render's injected $PORT.
+#
+# Deploy: push this file, then on https://dashboard.render.com →
+#   New + → Blueprint → pick this repo. Render reads render.yaml automatically.
+services:
+  - type: web
+    name: secondbrain
+    runtime: python
+    plan: free                       # 512 MB RAM; torch is heavy — see DEPLOY.md note
+    pythonVersion: "3.11"            # matches local
+    buildCommand: pip install -r requirements.txt
+    # Streamlit must bind 0.0.0.0:$PORT and run headless (no browser to open).
+    startCommand: streamlit run app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true
+    envVars:
+      # Set these values in the Render dashboard (Environment tab) — do NOT
+      # commit real keys. Copy them from your local .env, same as DEPLOY.md.
+      - key: LLM_PROVIDER
+        value: groq
+      - key: GROQ_MODEL
+        value: llama-3.1-8b-instant
+      - key: GROQ_API_KEY
+        sync: false                  # secret — prompted in dashboard, not stored here
+      - key: STORAGE_BACKEND
+        value: supabase
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false

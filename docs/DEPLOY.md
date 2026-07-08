@@ -41,7 +41,33 @@ Two ways to use the app. Both share the same `core/` logic.
 > ChromaDB is heavy; this small vault works, but first load is slow. If it OOMs,
 > switch to a lighter embedding or ChromaDB's built-in embedder.
 
-## B. Claude Desktop (local MCP server)
+## B. Render (persistent web service)
+
+Streamlit is a long-running WebSocket server, so it needs a real process — it
+**cannot** run on Vercel/Netlify serverless functions. Render's free web service
+runs it as a proper process.
+
+1. Push this repo to **GitHub**.
+2. Go to https://dashboard.render.com → **New +** → **Blueprint** → pick this
+   repo. Render reads the committed **`render.yaml`** automatically (build =
+   `pip install -r requirements.txt`, start = `streamlit run app.py
+   --server.port $PORT --server.address 0.0.0.0 --server.headless true`).
+3. In the **Environment** tab, fill the secret values (copied from your `.env`):
+   `GROQ_API_KEY`, `SUPABASE_URL`, `SUPABASE_KEY`. The non-secret ones
+   (`LLM_PROVIDER`, `GROQ_MODEL`, `STORAGE_BACKEND`) are already in `render.yaml`.
+4. Deploy → you get a public `https://<app>.onrender.com` URL. First build takes
+   a few minutes (installs torch/sentence-transformers).
+
+> **Config source:** on Render there's no `st.secrets`, so `app.py` falls back to
+> reading `os.environ` — Render injects the env vars above directly, so it just
+> works. No code change needed.
+
+> **Free-tier caveats:** 512 MB RAM (torch + sentence-transformers is heavy — a
+> small vault is fine, but if it OOMs, bump the plan or use a lighter embedding),
+> and the service **spins down after ~15 min idle**, so the first request after a
+> lull is slow to wake.
+
+## C. Claude Desktop (local MCP server)
 
 Add to Claude Desktop's `claude_desktop_config.json`:
 
