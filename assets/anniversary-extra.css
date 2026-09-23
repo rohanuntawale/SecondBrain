@@ -1,5 +1,6 @@
 /* Shared sunflower keepsake: paper, pressed flowers, handwritten margins. */
 [hidden]{display:none!important}
+body{--ambient-x:50%;--ambient-y:12%;background:radial-gradient(420px circle at var(--ambient-x) var(--ambient-y),#f7edc633,transparent 68%),var(--paper)}#ambient-field{position:fixed;inset:0;z-index:20;pointer-events:none;overflow:hidden}.ambient-petal{position:absolute;width:12px;height:19px;border-radius:90% 10% 90% 10%;background:linear-gradient(135deg,#f6d15a,#d99627);opacity:.58;animation:ambient-drift 2.6s ease-out forwards}.ambient-petal:nth-child(2n){background:linear-gradient(135deg,#e5b1a2,#bd7568);border-radius:90% 10% 70% 20%}
 .keepsake-nav{display:flex;gap:5px;flex-wrap:wrap;padding:15px 0;border-bottom:1px solid var(--line)}
 .keepsake-nav a{text-decoration:none;font-size:11px;padding:9px 14px;border-radius:30px;transition:background .2s}
 .keepsake-nav a:hover{background:#eee9d3}.keepsake-nav a[aria-current="page"]{background:var(--green);color:#fff}
@@ -14,3 +15,8 @@
 .match-grid{grid-template-columns:repeat(4,minmax(0,1fr))}.match-card{min-width:0;padding:4px}
 @media(max-width:370px){.match-grid{gap:8px}.match-card{font-size:20px}}
 @media(prefers-reduced-motion:reduce){.confetti-heart{display:none}.hug-button.hugging{animation:none}.envelope:hover,.hug-button:hover,.match-card:hover{transform:none}}
+
+/* Hands-on additions: a jar that reacts, a ticket surprise, and a living paper sky. */
+.jar-shaker{display:block;border:0;padding:0;background:transparent;margin:auto;cursor:grab;touch-action:manipulation}.jar-shaker:active{cursor:grabbing}.jar-shaker .glass-jar{display:block}.jar-shaker:hover .glass-jar{filter:brightness(1.035)}.jar-shaker.shaking{animation:jar-shake .72s cubic-bezier(.36,.07,.19,.97)}.jar-shaker.shaking .glass-jar i{animation:note-tumble .72s ease-in-out}.ticket-reveal{border:0;border-bottom:1px dashed #b38a45;background:transparent;padding:4px 0;color:var(--ochre);font-size:10px}.ticket-secret{font:italic 15px/1.5 var(--serif);color:var(--green);min-height:0;margin:0!important}.ticket-secret:not(:empty){margin-top:10px!important}.constellation.traced{background:radial-gradient(ellipse at center,#e9ce7633,transparent 65%);border-radius:50%}.envelope.unsealed:after{animation:seal-pop .42s ease both}.envelope.unsealed:before{animation:flap-open .42s ease both;transform-origin:top}.ambient-petal{will-change:transform,opacity}
+@keyframes ambient-drift{to{transform:translate(var(--drift-x),var(--drift-y)) rotate(230deg);opacity:0}}@keyframes jar-shake{10%,90%{transform:translateX(-2px) rotate(-2deg)}20%,80%{transform:translateX(5px) rotate(3deg)}30%,50%,70%{transform:translateX(-8px) rotate(-4deg)}40%,60%{transform:translateX(8px) rotate(4deg)}}@keyframes note-tumble{50%{margin-top:-10px}}@keyframes seal-pop{50%{transform:scale(1.35)}100%{transform:scale(.82);opacity:.74}}@keyframes flap-open{to{transform:rotateX(55deg);opacity:.48}}
+@media(prefers-reduced-motion:reduce){.ambient-petal{display:none}.jar-shaker.shaking,.jar-shaker.shaking .glass-jar i,.envelope.unsealed:after,.envelope.unsealed:before{animation:none}}

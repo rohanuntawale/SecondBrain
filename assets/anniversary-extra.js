@@ -3,6 +3,7 @@
   'use strict';
   const $ = id => document.getElementById(id);
   const STORAGE_KEY = 'rp-anniversary-keepsake-v1';
+  const NOTE_COUNT = 60;
   let stored = {};
   let storageAvailable = true;
   try { stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}') || {}; }
@@ -10,7 +11,7 @@
   const validIds = (value, count) => Array.isArray(value)
     ? [...new Set(value.filter(n => Number.isInteger(n) && n >= 0 && n < count))] : [];
   const state = {
-    favourites: validIds(stored.favourites, 36),
+    favourites: validIds(stored.favourites, NOTE_COUNT),
     letters: validIds(stored.letters, 6),
     coupons: validIds(stored.coupons, 6),
     stars: validIds(stored.stars, 6),
@@ -85,6 +86,29 @@
       setTimeout(() => heart.remove(), 2400);
     }
   }
+  const ambient = $('ambient-field');
+  let lastAmbientPetal = 0;
+  function addAmbientPetal(x, y) {
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const now = performance.now();
+    if (now - lastAmbientPetal < 110) return;
+    lastAmbientPetal = now;
+    const petal = document.createElement('span');
+    petal.className = 'ambient-petal';
+    petal.style.left = `${x}px`; petal.style.top = `${y}px`;
+    petal.style.setProperty('--drift-x', `${Math.round(Math.random() * 90 - 45)}px`);
+    petal.style.setProperty('--drift-y', `${Math.round(-90 - Math.random() * 95)}px`);
+    ambient.appendChild(petal);
+    setTimeout(() => petal.remove(), 2800);
+  }
+  document.addEventListener('pointermove', event => {
+    document.body.style.setProperty('--ambient-x', `${event.clientX}px`);
+    document.body.style.setProperty('--ambient-y', `${event.clientY}px`);
+    if (event.pointerType === 'mouse') addAmbientPetal(event.clientX, event.clientY);
+  }, {passive: true});
+  document.addEventListener('pointerdown', event => {
+    addAmbientPetal(event.clientX, event.clientY);
+  }, {passive: true});
   function shuffled(values) {
     const result = [...values];
     for (let i = result.length - 1; i > 0; i--) {
@@ -130,11 +154,35 @@
     ['comfort', 'If I cannot fix the thing, I can still listen. And listen again.'],
     ['comfort', 'There is no version of a difficult day that makes you a burden for having feelings.'],
     ['comfort', 'For now, unclench your shoulders. Imagine my hand in yours. We can take the next little step slowly.'],
+    ['flirty', 'You are the kind of pretty that makes me forget the very normal sentence I was about to say.'],
+    ['flirty', 'I would very much like to be the reason you look at your phone and smile like that.'],
+    ['flirty', 'Respectfully: your boyfriend thinks you are dangerously adorable.'],
+    ['flirty', 'A tiny reminder that your hand fits very nicely in mine. I have conducted extensive imaginary research.'],
+    ['flirty', 'If I were with you right now, I would probably be looking at you instead of whatever we were meant to be doing.'],
+    ['flirty', 'You are my favourite kind of trouble: the kind that makes everything better.'],
+    ['future', 'Someday, I want a photo of us doing something completely ordinary and looking very happy about it.'],
+    ['future', 'I am saving little ideas for us: a walk, a snack, a song, a place with warm light.'],
+    ['future', 'There are future versions of us who have inside jokes we have not even made yet. I cannot wait to meet them.'],
+    ['future', 'One day, let’s make an entire day out of following tiny impulses and calling it a perfect plan.'],
+    ['future', 'I hope our future has slow mornings, honest talks, and an unreasonable number of shared snacks.'],
+    ['future', 'Whatever comes next, I like the idea of facing it with your hand somewhere near mine.'],
+    ['because', 'Because you make affection feel like a place I can come home to.'],
+    ['because', 'Because your little stories make my day more interesting than they have any right to.'],
+    ['because', 'Because I love the person you are when nobody is asking you to perform.'],
+    ['because', 'Because you deserve to be told that you are cherished, and I intend to keep saying it.'],
+    ['because', 'Because even a short conversation with you can leave my whole day softer around the edges.'],
+    ['because', 'Because “us” is one of my favourite words now.'],
+    ['because', 'Because you are you, Pooja. It is a complete answer.'],
+    ['because', 'Because loving you is not a grand performance. It is a hundred small, happy choices.'],
+    ['gratitude', 'Thank you for letting me know you. I do not take that little gift lightly.'],
+    ['gratitude', 'Thank you for every time you make room for my thoughts, even the half-finished ones.'],
+    ['gratitude', 'Thank you for being someone I want to celebrate, not just on the big days.'],
+    ['gratitude', 'Thank you for making this year feel more like ours.'],
   ];
   let filter = 'all';
   let currentNote = null;
   const noteDecks = new Map();
-  function drawNote() {
+  function drawNote(source = 'button') {
     let deck = noteDecks.get(filter) || [];
     if (!deck.length) {
       deck = shuffled(notes.map((_, i) => i).filter(i => filter === 'all' || notes[i][0] === filter));
@@ -143,10 +191,10 @@
     currentNote = deck.pop();
     noteDecks.set(filter, deck);
     $('jar-note').textContent = notes[currentNote][1];
-    $('note-number').textContent = `Little love note ${String(currentNote + 1).padStart(2, '0')} / 36`;
+    $('note-number').textContent = `Little love note ${String(currentNote + 1).padStart(2, '0')} / ${notes.length}`;
     $('save-note').disabled = false;
     updateSaveButton();
-    $('note-status').textContent = deck.length ? `${deck.length} more little reminders in this collection.` : 'Every note read. Another tap gives your collection a fresh shuffle.';
+    $('note-status').textContent = deck.length ? `${deck.length} more little reminders in this collection${source === 'jar' ? ' — the jar had good instincts' : ''}.` : 'Every note read. Another tap gives your collection a fresh shuffle.';
   }
   function updateSaveButton() {
     const saved = state.favourites.includes(currentNote);
@@ -187,6 +235,12 @@
     drawNote();
   }));
   $('draw-note').addEventListener('click', drawNote);
+  $('shake-jar').addEventListener('click', () => {
+    const jar = $('shake-jar');
+    jar.classList.remove('shaking'); void jar.offsetWidth; jar.classList.add('shaking');
+    drawNote('jar'); hearts(jar);
+    setTimeout(() => jar.classList.remove('shaking'), 800);
+  });
   $('save-note').addEventListener('click', () => {
     if (currentNote === null) return;
     if (state.favourites.includes(currentNote)) state.favourites = state.favourites.filter(n => n !== currentNote);
@@ -243,6 +297,7 @@
     const read = document.createElement('span'); read.className = 'read-mark'; read.textContent = state.letters.includes(id) ? 'Opened with love ♡' : 'Just for you';
     button.append(preface, label, read);
     button.addEventListener('click', () => {
+      button.classList.remove('unsealed'); void button.offsetWidth; button.classList.add('unsealed');
       $('opened-letter-title').textContent = `When ${title}…`;
       $('opened-letter-body').replaceChildren(...paragraphs.map(text => { const p = document.createElement('p'); p.textContent = text; return p; }));
       if (!state.letters.includes(id)) state.letters.push(id);
@@ -277,6 +332,15 @@
       ['A tiny scavenger hunt', 'Give each other five prompts: something cosy, something yellow, something funny, something old, and something you want to explain.', 'Bring: five objects nearby and your best show-and-tell energy.'],
     ],
   };
+  const ticketSecrets = [
+    'Extra detail: I will absolutely save you the last bite.',
+    'Extra detail: a hand-hold is strongly encouraged.',
+    'Extra detail: we are allowed to change the plan halfway through.',
+    'Extra detail: your laugh is the only review I need.',
+    'Extra detail: there is no such thing as too much quality time with you.',
+    'Extra detail: this ticket comes with one very fond date partner.',
+  ];
+  let ticketSecretIndex = 0;
   let mood = 'cosy'; let currentDate = null;
   const dateDecks = new Map();
   function lookupDate(key) { const [type, index] = (key || '').split(':'); return dates[type]?.[Number(index)]; }
@@ -297,10 +361,16 @@
     const [title, description, detail] = dates[mood][index];
     $('date-label').textContent = document.querySelector(`[data-date-mood="${mood}"]`).textContent;
     $('date-title').textContent = title; $('date-description').textContent = description; $('date-detail').textContent = detail;
+    $('ticket-secret').textContent = ''; $('reveal-ticket').textContent = 'Tap for a tiny extra ♡'; $('reveal-ticket').setAttribute('aria-expanded', 'false');
     $('keep-date').disabled = false; $('keep-date').textContent = state.date === currentDate ? '♥ Plan saved' : '♡ Save this plan';
     $('date-status').textContent = 'A suggestion, a little anticipation, and a very cute date partner.';
   }
   $('pick-date').addEventListener('click', pickDate);
+  $('reveal-ticket').addEventListener('click', () => {
+    $('ticket-secret').textContent = ticketSecrets[ticketSecretIndex++ % ticketSecrets.length];
+    $('reveal-ticket').textContent = 'One more tiny extra ↗'; $('reveal-ticket').setAttribute('aria-expanded', 'true');
+    hearts($('reveal-ticket'));
+  });
   $('keep-date').addEventListener('click', () => {
     if (!currentDate) return;
     state.date = currentDate; save(); renderSavedDate();
@@ -341,7 +411,11 @@
     [85, 44, 'There are so many places in this world. Beside you is high on my list.'],
     [74, 83.2, 'A whole sky of possibilities, and I am here making little wishes about us.'],
   ];
-  function updateStarProgress() { $('star-progress').textContent = state.stars.length === 6 ? 'A whole constellation of us. You found every little light. ♡' : `${state.stars.length} of 6 little lights discovered`; }
+  function updateStarProgress() {
+    const complete = state.stars.length === 6;
+    $('star-progress').textContent = complete ? 'A whole constellation of us. You found every little light. ♡' : `${state.stars.length} of 6 little lights discovered`;
+    $('constellation').classList.toggle('traced', complete);
+  }
   stars.forEach(([x, y, message], id) => {
     const button = document.createElement('button'); button.className = 'star-button'; button.textContent = '✧';
     button.style.left = `${x}%`; button.style.top = `${y}%`;
