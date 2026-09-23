@@ -1,0 +1,7 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "installCommand": "echo 'No dependencies required for the anniversary site'",
+  "buildCommand": "mkdir -p site && cp assets/anniversary.html site/index.html && cp assets/anniversary-extra.css assets/anniversary-extra.js site/",
+  "outputDirectory": "site"
+}
