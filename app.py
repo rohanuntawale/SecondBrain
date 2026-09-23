@@ -15,6 +15,18 @@ from datetime import date
 
 import streamlit as st
 
+# The surprise link loads without initializing models or syncing the vault.
+# Share the app URL with ?page=anniversary to open it directly.
+if st.query_params.get("page") == "anniversary":
+    from anniversary import render_anniversary
+
+    st.set_page_config(
+        page_title="One year of us · Rohan & Pooja", page_icon="🌻",
+        layout="wide", initial_sidebar_state="collapsed",
+    )
+    render_anniversary()
+    st.stop()
+
 # On Streamlit Cloud, secrets arrive via st.secrets — mirror them into the
 # environment BEFORE importing core (which reads env at import time).
 # Locally there is no secrets.toml (config comes from .env), and touching
@@ -484,6 +496,7 @@ if st.session_state.pop("_just_synced", False):
 # --- Sidebar ------------------------------------------------------------------
 with st.sidebar:
     st.title("🧠 SecondBrain")
+    st.link_button("🌻 Our first anniversary", "?page=anniversary")
     st.caption("RAG + MCP smart notes assistant")
     st.markdown(f"**LLM provider:** `{config.LLM_PROVIDER}`")
 
@@ -545,7 +558,7 @@ with st.sidebar:
 
 # --- Tabs ---------------------------------------------------------------------
 PAGES = [
-    "💬 Ask", "💞 Us", "📸 Photos", "📔 Diary", "💡 Insights", "📚 Notes",
+    "💬 Ask", "💞 Us", "🌻 Anniversary", "📸 Photos", "📔 Diary", "💡 Insights", "📚 Notes",
     "🕸️ Graph", "✍️ Create", "📰 Digest", "⬆️ Upload",
 ]
 if config.BETA_FEATURES:
@@ -563,8 +576,13 @@ page = st.radio(
     "Go to", PAGES, horizontal=True, label_visibility="collapsed", key="nav"
 )
 
+if page == "🌻 Anniversary":
+    from anniversary import render_anniversary
+
+    render_anniversary()
+
 # Ask (streaming multi-turn chat) ---------------------------------------------
-if page == "💬 Ask":
+elif page == "💬 Ask":
     st.subheader("Ask anything")
     _MODE_LABELS = {
         "notes": "📚 Notes only",
